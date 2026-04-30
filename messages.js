@@ -1,38 +1,83 @@
 const MESSAGES = [
-"Lagi sibuk atau santai nih? 😊",
+
+"Lagi sibuk atau santai nih?",
+
 "Gimana kabarnya hari ini?",
+
 "Lagi dimana sekarang?",
-"Udah makan belum? 🍜",
+
+"Udah makan belum?",
+
 "Lagi ngapain nih?",
+
 "Hari ini aktivitasnya padat nggak?",
-"Masih online ya? 👋",
-"Lagi kerja atau lagi santai?",
-"Cuaca di sana lagi gimana?",
+
+"Masih online ya?",
+
+"Lagi kerja atau santai?",
+
+"Cuaca di sana gimana?",
+
 "Udah istirahat belum?",
-"Lagi dengerin musik apa sekarang? 🎵",
-"Suka begadang nggak sih? 😄",
-"Lagi main HP terus ya?",
-"Besok ada rencana kemana?",
-"Suka kopi atau teh nih? ☕",
-"Udah mandi belum? 😆",
+
+"Lagi dengerin musik apa?",
+
+"Suka begadang nggak sih?",
+
+"Lagi scroll-scroll ya?",
+
+"Besok ada rencana?",
+
+"Suka kopi atau teh?",
+
 "Hari ini capek nggak?",
-"Lagi nonton apa sekarang?",
+
+"Lagi nonton apa?",
+
 "Biasanya tidur jam berapa?",
+
 "Suka hujan atau panas?",
-"Lagi rebahan ya sekarang? 😄",
-"Udah minum belum hari ini?",
-"Lagi sendiri atau rame-rame?",
-"Kalau libur biasanya ngapain?",
-"Suka makanan pedas nggak? 🌶️",
-"Lagi scroll-scroll doang ya?",
-"Masih melek sampai sekarang?",
-"Kalau weekend biasanya kemana?",
-"Lagi mood ngobrol nggak?",
-"Lagi cari kesibukan ya? 😊"
+
+"Lagi rebahan ya?"
+
 ];
 
+
+
 function randomMessage() {
-    return MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+
+    const base = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+
+
+
+    const styles = [
+
+        base,
+
+        base.toLowerCase(),
+
+        base + " 😄",
+
+        base + " hehe",
+
+        base + " btw",
+
+        base.replace("?", "??"),
+
+        base.split(" ").slice(0, 3).join(" "),
+
+        base + "...",
+
+        base + " wkwk"
+
+    ];
+
+
+
+    return styles[Math.floor(Math.random() * styles.length)];
+
 }
+
+
 
 module.exports = { randomMessage };
