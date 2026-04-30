@@ -41,6 +41,10 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+run_quiet() {
+    "$@" >/dev/null 2>&1
+}
+
 apt_install() {
     if [ "${EUID:-$(id -u)}" -eq 0 ]; then
         apt-get update -y
@@ -63,16 +67,16 @@ auto_install() {
 
     if need_cmd pkg; then
         echo "[1/5] Environment : Termux"
-        echo "[2/5] Updating packages..."
-        pkg update -y >/dev/null && pkg upgrade -y >/dev/null
-        need_cmd node || pkg install nodejs-lts -y >/dev/null || pkg install nodejs -y >/dev/null
-        need_cmd git || pkg install git -y >/dev/null
+        echo "[2/5] Checking packages..."
+        run_quiet pkg update -y
+        need_cmd node || run_quiet pkg install nodejs-lts -y || run_quiet pkg install nodejs -y
+        need_cmd git || run_quiet pkg install git -y
     elif need_cmd apt-get; then
         echo "[1/5] Environment : Ubuntu/Debian"
         echo "[2/5] Checking system packages..."
-        need_cmd node || apt_install nodejs npm >/dev/null
-        need_cmd npm || apt_install npm >/dev/null
-        need_cmd git || apt_install git >/dev/null
+        need_cmd node || run_quiet apt_install nodejs npm
+        need_cmd npm || run_quiet apt_install npm
+        need_cmd git || run_quiet apt_install git
     else
         echo "[1/5] Environment : Unknown"
         echo "No pkg or apt-get found. Install Node.js and npm manually first."
@@ -102,7 +106,7 @@ auto_install() {
     npm config set audit false >/dev/null 2>&1 || true
 
     echo "[4/5] Installing bot modules..."
-    if npm install @whiskeysockets/baileys pino qrcode-terminal --no-audit --no-fund --silent; then
+    if npm install @whiskeysockets/baileys pino qrcode-terminal --no-audit --no-fund --silent >/dev/null 2>&1; then
         echo "      Modules ready."
     else
         echo "FAILED: Module install failed."
@@ -112,7 +116,7 @@ auto_install() {
 
     echo "[5/5] Checking PM2..."
     if ! need_cmd pm2; then
-        npm install -g pm2 --no-audit --no-fund --silent </dev/null || npm install pm2 --save-dev --no-audit --no-fund --silent </dev/null
+        npm install -g pm2 --no-audit --no-fund --silent </dev/null >/dev/null 2>&1 || npm install pm2 --save-dev --no-audit --no-fund --silent </dev/null >/dev/null 2>&1
     fi
 
     echo ""
