@@ -1,7 +1,8 @@
 module.exports = {
-    minDelay: 1800000,   // 30 menit
-    maxDelay: 2400000,   // 40 menit
+    minDelay: 1800000,       // 30 menit
+    maxDelay: 2400000,       // 40 menit
     typingDelay: [5000, 15000],
     retry: 2,
-    sendChance: 1        // 1 = selalu kirim, 0.7 = 70% kirim
+    sendChance: 1,           // 1 = selalu kirim, 0.7 = 70% kirim
+    presenceOnlyChance: 0    // 0 = jangan skip pesan, 0.2 = 20% hanya online
 };

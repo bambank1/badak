@@ -294,7 +294,7 @@ run_bot() {
     fi
 
     if [ "$LOOP_MODE" != "1" ]; then
-        pause
+        sleep 1
     fi
 }
 

@@ -100,7 +100,7 @@ function humanTypingDelay(text) {
 }
 
 async function randomHumanPause() {
-    if (Math.random() < 0.2) {
+    if (Math.random() < Number(CONFIG.presenceOnlyChance ?? 0)) {
         const delayTime = Math.floor(Math.random() * 600000) + 60000;
         await delay(delayTime);
     }
@@ -131,6 +131,32 @@ function canSend(jid) {
 const SESSION_NAME = process.env.SESSION || 'default';
 const SESSION_PATH = `./sessions/${SESSION_NAME}`;
 const HISTORY_FILE = './nomor_wa.txt';
+const LOG_DIR = './logs';
+const LOG_FILE = `${LOG_DIR}/${SESSION_NAME}.log`;
+
+function nowStamp() {
+    return new Date().toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function maskJid(jid) {
+    const number = String(jid || '').replace(/@.*/, '');
+    if (number.length <= 6) return number || '-';
+    return `${number.slice(0, 4)}***${number.slice(-3)}`;
+}
+
+function logActivity(message, level = 'INFO') {
+    const line = `[${nowStamp()}] [${SESSION_NAME}] [${level}] ${message}`;
+    const terminalColor = level === 'ERROR' ? color.red : level === 'WARN' ? color.yellow : color.cyan;
+
+    process.stdout.write('\x1b[2K');
+    process.stdout.write('\r');
+    console.log(terminalColor + line + color.reset);
+
+    try {
+        fs.mkdirSync(LOG_DIR, { recursive: true });
+        fs.appendFileSync(LOG_FILE, line + '\n');
+    } catch {}
+}
 
 function hasSavedSession() {
     try {
@@ -278,7 +304,7 @@ async function startBot() {
             : (selectedLoginMethod || await chooseLoginMethod(question, color));
         selectedLoginMethod = loginMethod === 'session' ? null : loginMethod;
         if (loginMethod === 'session') {
-            console.log(color.cyan + 'Using saved session (' + SESSION_NAME + ')...' + color.reset);
+            logActivity('Using saved session');
         }
         process.env.BAILEYS_NO_QR = loginMethod === 'qr' ? 'false' : 'true';
 
@@ -310,6 +336,7 @@ async function startBot() {
                 lastQr = qr;
                 console.clear();
                 console.log(color.yellow + 'LOGIN QR CODE' + color.reset);
+                logActivity('QR code generated, waiting for scan');
                 console.log('Scan QR ini dari WhatsApp:');
                 console.log('Perangkat Tertaut > Tautkan Perangkat > Scan QR Code\n');
 
@@ -323,7 +350,7 @@ async function startBot() {
             }
 
             if (connection === 'connecting' && authReady && !waitingForPairingInput) {
-                console.log(color.yellow + 'Connecting...' + color.reset);
+                logActivity('Connecting...', 'WARN');
             }
 
             if (connection === 'open') {
@@ -338,6 +365,7 @@ async function startBot() {
 
                 console.clear();
                 console.log(color.green + `BOT CONNECTED (${SESSION_NAME})\n` + color.reset);
+                logActivity('Connected and ready');
 
                 startWarming(sock, runId).catch((err) => {
                     console.log(color.red + 'BOT ERROR: ' + (err?.message || err) + color.reset);
@@ -351,16 +379,16 @@ async function startBot() {
                 activeRunId++;
                 warmingStarted = false;
 
-                console.log('\n' + color.red + `Disconnect (${reason || 'unknown'})` + color.reset);
+                logActivity(`Disconnect ${reason || 'unknown'}`, 'ERROR');
 
                 if (reason === DisconnectReason.loggedOut || reason === 401) {
                     selectedLoginMethod = null;
-                    console.log(color.red + 'Session logout. Delete this session and pair again.\n' + color.reset);
+                    logActivity('Session logout. Delete this session and pair again.', 'ERROR');
                     return;
                 }
 
                 if (reason === DisconnectReason.restartRequired || reason === 515) {
-                    console.log(color.yellow + 'Restarting connection, keep scanning/waiting...\n' + color.reset);
+                    logActivity('Restarting connection, keep scanning/waiting...', 'WARN');
                     scheduleReconnect('restart required', 1000);
                     return;
                 }
@@ -373,7 +401,7 @@ async function startBot() {
         authReady = sock.authState.creds.registered;
     } catch (err) {
         isRunning = false;
-        console.log(color.red + 'ERROR START BOT: ' + (err?.message || err) + color.reset);
+        logActivity('ERROR START BOT: ' + (err?.message || err), 'ERROR');
         scheduleReconnect('start error');
     }
 }
@@ -391,6 +419,8 @@ async function startWarming(sock, runId = activeRunId) {
 
     if (process.env.LOOP_MODE === '1') resetLastChat();
 
+    logActivity('Starting send round');
+
     try {
         await sock.sendPresenceUpdate('available');
     } catch {}
@@ -398,7 +428,7 @@ async function startWarming(sock, runId = activeRunId) {
     const targets = loadTargets();
 
     if (!targets.length) {
-        console.log(color.red + 'Nomor kosong. Isi nomor_wa.txt dulu.' + color.reset);
+        logActivity('nomor_wa.txt is empty', 'WARN');
         if (process.env.LOOP_MODE === '1') {
             const loopDelay = Math.max(1, Number(process.env.LOOP_DELAY || 60)) * 1000;
             const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
@@ -409,6 +439,7 @@ async function startWarming(sock, runId = activeRunId) {
     }
 
     total = targets.length;
+    logActivity(`Loaded ${total} target(s)`);
     success = 0;
     failed = 0;
     startTime = Date.now();
@@ -417,15 +448,18 @@ async function startWarming(sock, runId = activeRunId) {
         if (!isCurrentConnection(runId)) return;
 
         const jid = targets[i];
+        logActivity(`Processing target ${i + 1}/${targets.length}: ${maskJid(jid)}`);
 
         if (!canSend(jid)) {
+            logActivity(`Skipped cooldown: ${maskJid(jid)}`, 'WARN');
             renderUI(i + 1);
             continue;
         }
 
         try {
-            if (Math.random() < 0.2) {
+            if (Math.random() < Number(CONFIG.presenceOnlyChance ?? 0)) {
                 await sock.sendPresenceUpdate('available', jid);
+                logActivity(`Presence only: ${maskJid(jid)}`);
                 renderUI(i + 1);
                 {
                     const ok = await waitWithLoading(5000 + Math.random() * 10000, 'Next target', () => isCurrentConnection(runId));
@@ -435,25 +469,35 @@ async function startWarming(sock, runId = activeRunId) {
             }
 
             const result = await sendHuman(sock, jid);
-            if (result) success++;
-            else failed++;
+            if (result) {
+                success++;
+                logActivity(`Message sent: ${maskJid(jid)}`);
+            } else {
+                failed++;
+                logActivity(`Message skipped by sendChance: ${maskJid(jid)}`, 'WARN');
+            }
         } catch (err) {
             failed++;
-            console.log('\n' + color.red + `Gagal proses ${jid}: ${err?.message || err}` + color.reset);
+            logActivity(`Failed target ${maskJid(jid)}: ${err?.message || err}`, 'ERROR');
         }
 
         renderUI(i + 1);
 
-        const baseDelay = randomDelay(CONFIG.minDelay, CONFIG.maxDelay);
-        const chaos = Math.random() < 0.4 ? randomDelay(10000, 60000) : 0;
-        {
-            const ok = await waitWithLoading(baseDelay + chaos, 'Next message', () => isCurrentConnection(runId));
-            if (!ok) return;
+        const isLastTarget = i === targets.length - 1;
+
+        if (!isLastTarget) {
+            const baseDelay = randomDelay(CONFIG.minDelay, CONFIG.maxDelay);
+            logActivity(`Waiting next message base delay ${Math.floor(baseDelay / 1000)}s`);
+            const chaos = Math.random() < 0.4 ? randomDelay(10000, 60000) : 0;
+            {
+                const ok = await waitWithLoading(baseDelay + chaos, 'Next message', () => isCurrentConnection(runId));
+                if (!ok) return;
+            }
         }
 
-        if ((i + 1) % 5 === 0) {
+        if (!isLastTarget && (i + 1) % 5 === 0) {
             process.stdout.write('\n');
-            console.log('Resting...');
+            logActivity('Resting after 5 targets');
             {
                 const ok = await waitWithLoading(30000 + Math.random() * 60000, 'Resting', () => isCurrentConnection(runId));
                 if (!ok) return;
@@ -465,10 +509,12 @@ async function startWarming(sock, runId = activeRunId) {
     process.stdout.write('\n');
     console.log('------------------------------');
     console.log(color.green + '\nDONE ALL TARGETS' + color.reset);
+    logActivity(`Round done. OK ${success}, FAIL ${failed}`);
 
     if (process.env.LOOP_MODE === '1') {
         const loopDelay = Math.max(1, Number(process.env.LOOP_DELAY || 60)) * 1000;
         console.log(color.yellow + `\nAUTO LOOP: next round without reconnect in ${Math.floor(loopDelay / 1000)} seconds.` + color.reset);
+        logActivity(`Auto loop next round in ${Math.floor(loopDelay / 1000)} seconds`, 'WARN');
         const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
         if (!ok) return;
         return startWarming(sock, runId);
