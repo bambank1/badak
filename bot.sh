@@ -7,6 +7,7 @@ LOGIN_KEY="n"
 APP_NAME="WA BOT PANEL PRO"
 VERSION="v3.2 TERMUX UBUNTU"
 DEVELOPER="Nyipto Nanda Dev"
+UPDATE_REPO="https://github.com/bambank1/badak"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || {
@@ -372,6 +373,87 @@ edit_file() {
     fi
 }
 
+update_script() {
+    clear
+    echo "============================================================"
+    echo "                    UPDATE SCRIPT"
+    echo "============================================================"
+    cd "$SCRIPT_DIR" || return 1
+
+    if ! need_cmd git; then
+        echo "FAILED: git is not installed. Run AUTO INSTALLER first."
+        pause
+        return 1
+    fi
+
+    echo "[1/5] Source repo : $UPDATE_REPO"
+    update_tmp=".update_tmp_badak"
+    rm -rf "$update_tmp"
+
+    echo "[2/5] Downloading latest script..."
+    if ! git clone --depth 1 "$UPDATE_REPO" "$update_tmp" >/dev/null 2>&1; then
+        echo "FAILED: Cannot download update from GitHub."
+        echo "Check internet connection or repo URL."
+        rm -rf "$update_tmp"
+        pause
+        return 1
+    fi
+
+    echo "[3/5] Applying script files..."
+    copied=0
+    for file in bot.sh index.js auth.js config.js messages.js; do
+        if [ -f "$update_tmp/$file" ]; then
+            cp "$update_tmp/$file" "$file"
+            copied=$((copied + 1))
+            echo "      updated: $file"
+        fi
+    done
+
+    if [ "$copied" -eq 0 ]; then
+        echo "FAILED: No known script files found in repo."
+        rm -rf "$update_tmp"
+        pause
+        return 1
+    fi
+
+    rm -rf "$update_tmp"
+    chmod +x bot.sh 2>/dev/null || true
+
+    if ! need_cmd npm; then
+        echo "FAILED: npm is not installed. Run AUTO INSTALLER first."
+        pause
+        return 1
+    fi
+
+    echo "[4/5] Updating bot modules..."
+    if npm install @whiskeysockets/baileys@latest pino@latest qrcode-terminal@latest --no-audit --no-fund --silent >/dev/null 2>&1; then
+        echo "      Modules updated."
+    else
+        echo "      Module update failed. Keeping current modules."
+    fi
+
+    echo "[5/5] Refreshing project settings..."
+    npm pkg set main="index.js" type="commonjs" scripts.start="node index.js" >/dev/null 2>&1 || true
+
+    echo ""
+    echo "============================================================"
+    echo "Update summary"
+    echo "============================================================"
+    echo "Repo : $UPDATE_REPO"
+    echo "Files: $copied updated"
+    echo "Node : $(node --version 2>/dev/null || echo '-')"
+    echo "npm  : $(npm --version 2>/dev/null || echo '-')"
+    if need_cmd pm2; then
+        echo "PM2  : $(pm2 --version 2>/dev/null)"
+    elif [ -x "./node_modules/.bin/pm2" ]; then
+        echo "PM2  : local (use npx pm2)"
+    else
+        echo "PM2  : not installed"
+    fi
+    echo "Status: update complete"
+    echo "Note  : sessions, logs, and nomor_wa.txt were not changed"
+    pause
+}
 edit_message() { edit_file messages.js; }
 edit_config() { edit_file config.js; }
 edit_nomor() { ensure_files; edit_file nomor_wa.txt; }
@@ -393,6 +475,7 @@ show_menu() {
     echo "[12] EDIT NOMOR"
     echo ""
     echo "[13] AUTO INSTALLER"
+    echo "[14] UPDATE SCRIPT"
     echo ""
     echo "[0]  EXIT"
     echo ""
@@ -420,6 +503,7 @@ while true; do
         11) edit_config ;;
         12) edit_nomor ;;
         13) auto_install ;;
+        14) update_script ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
