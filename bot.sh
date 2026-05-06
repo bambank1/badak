@@ -42,6 +42,17 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+mask_repo_url() {
+    url="$1"
+    url="${url#https://github.com/}"
+    owner="${url%%/*}"
+    repo="${url#*/}"
+
+    owner_mask="${owner:0:2}***${owner: -1}"
+    repo_mask="${repo:0:2}***${repo: -1}"
+
+    echo "https://github.com/${owner_mask}/${repo_mask}"
+}
 run_quiet() {
     "$@" >/dev/null 2>&1
 }
@@ -128,9 +139,9 @@ auto_install() {
     echo "npm  : $(npm --version 2>/dev/null)"
 
     if need_cmd pm2; then
-        echo "PM2  : $(pm2 --version 2>/dev/null)"
+        echo "PM2     : $(pm2 --version 2>/dev/null)"
     elif [ -x "./node_modules/.bin/pm2" ]; then
-        echo "PM2  : local (use npx pm2)"
+        echo "PM2     : local (use npx pm2)"
     else
         echo "PM2  : not installed, RUN BOT can still use node"
     fi
@@ -386,7 +397,7 @@ update_script() {
         return 1
     fi
 
-    echo "[1/5] Source repo : $UPDATE_REPO"
+    echo "[1/5] Source repo : $(mask_repo_url "$UPDATE_REPO")"
     update_tmp=".update_tmp_badak"
     rm -rf "$update_tmp"
 
@@ -439,16 +450,17 @@ update_script() {
     echo "============================================================"
     echo "Update summary"
     echo "============================================================"
-    echo "Repo : $UPDATE_REPO"
-    echo "Files: $copied updated"
-    echo "Node : $(node --version 2>/dev/null || echo '-')"
-    echo "npm  : $(npm --version 2>/dev/null || echo '-')"
+    echo "Version : $VERSION"
+    echo "Repo    : $(mask_repo_url "$UPDATE_REPO")"
+    echo "Files   : $copied updated"
+    echo "Node    : $(node --version 2>/dev/null || echo '-')"
+    echo "npm     : $(npm --version 2>/dev/null || echo '-')"
     if need_cmd pm2; then
-        echo "PM2  : $(pm2 --version 2>/dev/null)"
+        echo "PM2     : $(pm2 --version 2>/dev/null)"
     elif [ -x "./node_modules/.bin/pm2" ]; then
-        echo "PM2  : local (use npx pm2)"
+        echo "PM2     : local (use npx pm2)"
     else
-        echo "PM2  : not installed"
+        echo "PM2     : not installed"
     fi
     echo "Status: update complete"
     echo "Note  : sessions, logs, and nomor_wa.txt were not changed"
