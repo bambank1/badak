@@ -504,6 +504,7 @@ show_menu() {
     echo "[14] UPDATE SCRIPT"
     echo ""
     echo "[0]  EXIT"
+    echo "Pilih nomor menu lalu tekan Enter."
     echo ""
 }
 
