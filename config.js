@@ -4,5 +4,8 @@ module.exports = {
     typingDelay: [5000, 15000],
     retry: 2,
     sendChance: 1,           // 1 = selalu kirim, 0.7 = 70% kirim
-    presenceOnlyChance: 0    // 0 = jangan skip pesan, 0.2 = 20% hanya online
+    presenceOnlyChance: 0,   // 0 = jangan skip pesan, 0.2 = 20% hanya online
+    localAIMessage: true,    // true = pakai AI lokal offline
+    localAITone: 'santai',   // santai, akrab, formal
+    localAIMaxLength: 90     // batas panjang pesan
 };
