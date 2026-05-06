@@ -57,6 +57,18 @@ run_quiet() {
     "$@" >/dev/null 2>&1
 }
 
+normalize_file() {
+    file="$1"
+    [ -f "$file" ] || return 0
+
+    if need_cmd sed; then
+        sed -i 's/\r$//' "$file" 2>/dev/null || true
+    else
+        tmp_file="${file}.tmp"
+        tr -d '\r' < "$file" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$file"
+    fi
+}
+
 apt_install() {
     if [ "${EUID:-$(id -u)}" -eq 0 ]; then
         apt-get update -y
@@ -415,6 +427,7 @@ update_script() {
     for file in bot.sh index.js auth.js config.js messages.js; do
         if [ -f "$update_tmp/$file" ]; then
             cp "$update_tmp/$file" "$file"
+            normalize_file "$file"
             copied=$((copied + 1))
             echo "      updated: $file"
         fi
@@ -428,6 +441,7 @@ update_script() {
     fi
 
     rm -rf "$update_tmp"
+    normalize_file bot.sh
     chmod +x bot.sh 2>/dev/null || true
 
     if ! need_cmd npm; then
