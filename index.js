@@ -5,8 +5,10 @@ if (process.env.RUN_FROM_SH !== "1") {
 
 process.env.BAILEYS_NO_QR = "true";
 
-console.clear();
-console.log("Starting bot...\n");
+if (process.env.MULTI_RUN !== '1') console.clear();
+console.log(process.env.MULTI_RUN === '1'
+    ? `Starting bot [${process.env.SESSION || 'default'}]...\n`
+    : "Starting bot...\n");
 
 const color = {
     reset: "\x1b[0m",
@@ -92,6 +94,12 @@ const question = (text) => new Promise((resolve) => {
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+function getLoopDelayMs() {
+    const fixed = Number(process.env.LOOP_DELAY || 0);
+    const min = Math.max(1, Number(process.env.LOOP_DELAY_MIN || fixed || 60));
+    const max = Math.max(min, Number(process.env.LOOP_DELAY_MAX || min));
+    return randomDelay(min, max) * 1000;
+}
 
 function humanTypingDelay(text) {
     const base = 300;
@@ -129,6 +137,7 @@ function canSend(jid) {
 }
 
 const SESSION_NAME = process.env.SESSION || 'default';
+const MULTI_RUN = process.env.MULTI_RUN === '1';
 const SESSION_PATH = `./sessions/${SESSION_NAME}`;
 const HISTORY_FILE = './nomor_wa.txt';
 const LOG_DIR = './logs';
@@ -144,17 +153,36 @@ function maskJid(jid) {
     return `${number.slice(0, 4)}***${number.slice(-3)}`;
 }
 
+function compactActivity(message) {
+    return String(message)
+        .replace(/^Using saved session$/, 'session saved')
+        .replace(/^Connected and ready$/, 'ready')
+        .replace(/^Starting send round$/, 'round start')
+        .replace(/^Loaded (\d+) target\(s\)$/, 'targets=$1')
+        .replace(/^Processing target (\d+)\/(\d+): (.+)$/, 'target $1/$2 $3')
+        .replace(/^Message sent: (.+)$/, 'sent $1')
+        .replace(/^Round done\. OK (\d+), FAIL (\d+)$/, 'done ok=$1 fail=$2')
+        .replace(/^Auto loop next round in (\d+) seconds$/, 'next loop $1s')
+        .replace(/^Waiting next message base delay (\d+)s$/, 'wait next $1s')
+        .replace(/^Disconnect (.+)$/, 'disconnect $1')
+        .replace(/^Connecting\.\.\.$/, 'connecting');
+}
+
 function logActivity(message, level = 'INFO') {
-    const line = `[${nowStamp()}] [${SESSION_NAME}] [${level}] ${message}`;
+    const stamp = nowStamp();
+    const fileLine = `[${stamp}] [${SESSION_NAME}] [${level}] ${message}`;
+    const terminalLine = MULTI_RUN
+        ? `[${stamp.slice(11)}] ${SESSION_NAME.padEnd(8).slice(0, 8)} ${level.padEnd(5).slice(0, 5)} ${compactActivity(message)}`
+        : fileLine;
     const terminalColor = level === 'ERROR' ? color.red : level === 'WARN' ? color.yellow : color.cyan;
 
     process.stdout.write('\x1b[2K');
     process.stdout.write('\r');
-    console.log(terminalColor + line + color.reset);
+    console.log(terminalColor + terminalLine + color.reset);
 
     try {
         fs.mkdirSync(LOG_DIR, { recursive: true });
-        fs.appendFileSync(LOG_FILE, line + '\n');
+        fs.appendFileSync(LOG_FILE, fileLine + '\n');
     } catch {}
 }
 
@@ -209,7 +237,8 @@ function renderUI(current) {
     const bar = colorBar + '#'.repeat(filled) + color.reset + '-'.repeat(barLength - filled);
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const eta = current > 0 ? Math.floor((elapsed / current) * (total - current)) : 0;
-    const line = `SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
+    const prefix = MULTI_RUN ? `[${SESSION_NAME}] ` : '';
+    const line = `${prefix}SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
 
     process.stdout.write('\x1b[2K');
     process.stdout.write('\r' + line);
@@ -236,7 +265,8 @@ async function waitWithLoading(ms, label = 'Next message', keepRunning = () => t
         const seconds = Math.ceil(remaining / 1000);
 
         process.stdout.write('\x1b[2K');
-        process.stdout.write(`\r${label} [${bar}] ${percent}% | wait ${seconds}s`);
+        const prefix = MULTI_RUN ? `[${SESSION_NAME}] ` : '';
+        process.stdout.write(`\r${prefix}${label} [${bar}] ${percent}% | wait ${seconds}s`);
 
         if (remaining <= 0) break;
         await delay(Math.min(1000, remaining));
@@ -334,7 +364,7 @@ async function startBot() {
 
             if (qr && loginMethod === 'qr' && qr !== lastQr) {
                 lastQr = qr;
-                console.clear();
+                if (!MULTI_RUN) console.clear();
                 console.log(color.yellow + 'LOGIN QR CODE' + color.reset);
                 logActivity('QR code generated, waiting for scan');
                 console.log('Scan QR ini dari WhatsApp:');
@@ -363,8 +393,10 @@ async function startBot() {
                 if (warmingStarted) return;
                 warmingStarted = true;
 
-                console.clear();
-                console.log(color.green + `BOT CONNECTED (${SESSION_NAME})\n` + color.reset);
+                if (!MULTI_RUN) console.clear();
+                console.log(color.green + (MULTI_RUN ? `BOT CONNECTED [${SESSION_NAME}]
+` : `BOT CONNECTED (${SESSION_NAME})
+`) + color.reset);
                 logActivity('Connected and ready');
 
                 startWarming(sock, runId).catch((err) => {
@@ -430,7 +462,7 @@ async function startWarming(sock, runId = activeRunId) {
     if (!targets.length) {
         logActivity('nomor_wa.txt is empty', 'WARN');
         if (process.env.LOOP_MODE === '1') {
-            const loopDelay = Math.max(1, Number(process.env.LOOP_DELAY || 60)) * 1000;
+            const loopDelay = getLoopDelayMs();
             const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
             if (!ok) return;
             return startWarming(sock, runId);
@@ -507,13 +539,17 @@ async function startWarming(sock, runId = activeRunId) {
     }
 
     process.stdout.write('\n');
-    console.log('------------------------------');
-    console.log(color.green + '\nDONE ALL TARGETS' + color.reset);
+    if (!MULTI_RUN) {
+        console.log('------------------------------');
+        console.log(color.green + '\nDONE ALL TARGETS' + color.reset);
+    }
     logActivity(`Round done. OK ${success}, FAIL ${failed}`);
 
     if (process.env.LOOP_MODE === '1') {
-        const loopDelay = Math.max(1, Number(process.env.LOOP_DELAY || 60)) * 1000;
-        console.log(color.yellow + `\nAUTO LOOP: next round without reconnect in ${Math.floor(loopDelay / 1000)} seconds.` + color.reset);
+        const loopDelay = getLoopDelayMs();
+        if (!MULTI_RUN) {
+            console.log(color.yellow + `\nAUTO LOOP: next round without reconnect in ${Math.floor(loopDelay / 1000)} seconds.` + color.reset);
+        }
         logActivity(`Auto loop next round in ${Math.floor(loopDelay / 1000)} seconds`, 'WARN');
         const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
         if (!ok) return;

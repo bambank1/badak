@@ -302,7 +302,7 @@ run_bot() {
             akun="$(basename "$dir")"
             found=1
             echo "Starting: $akun"
-            RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" SESSION="$akun" node index.js &
+            MULTI_RUN=1 RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" SESSION="$akun" node index.js &
             sleep $((RANDOM % 5 + 2))
         done
 
@@ -323,26 +323,43 @@ run_bot() {
 }
 
 auto_loop() {
-    read -r -p "Loop delay in seconds: " d
-    case "$d" in
+    read -r -p "Loop random minimum seconds: " min_d
+    case "$min_d" in
         ''|*[!0-9]*)
-            echo "Delay must be a number."
+            echo "Minimum delay must be a number."
             sleep 1
             return
             ;;
     esac
 
+    read -r -p "Loop random maximum seconds: " max_d
+    case "$max_d" in
+        ''|*[!0-9]*)
+            echo "Maximum delay must be a number."
+            sleep 1
+            return
+            ;;
+    esac
+
+    if [ "$max_d" -lt "$min_d" ]; then
+        echo "Maximum delay must be greater than or equal to minimum delay."
+        sleep 1
+        return
+    fi
+
     clear
     echo "AUTO LOOP ACTIVE"
-    echo "Delay: ${d} seconds"
+    echo "Delay: random ${min_d}-${max_d} seconds"
     echo "Loop berjalan di dalam koneksi bot, jadi tidak reconnect tiap putaran."
     echo ""
 
     export LOOP_MODE=1
-    export LOOP_DELAY="$d"
+    export LOOP_DELAY_MIN="$min_d"
+    export LOOP_DELAY_MAX="$max_d"
     run_bot
     LOOP_MODE=0
-    unset LOOP_DELAY
+    unset LOOP_DELAY_MIN
+    unset LOOP_DELAY_MAX
 }
 
 view_nomor() {
