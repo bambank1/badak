@@ -136,6 +136,7 @@ function canSend(jid) {
 
 const SESSION_NAME = process.env.SESSION || 'default';
 const MULTI_RUN = process.env.MULTI_RUN === '1';
+const LIST_GROUPS = process.env.LIST_GROUPS === '1';
 const SESSION_PATH = `./sessions/${SESSION_NAME}`;
 const HISTORY_FILE = './nomor_wa.txt';
 const LOG_DIR = './logs';
@@ -146,9 +147,11 @@ function nowStamp() {
 }
 
 function maskJid(jid) {
-    const number = String(jid || '').replace(/@.*/, '');
-    if (number.length <= 6) return number || '-';
-    return `${number.slice(0, 4)}***${number.slice(-3)}`;
+    const raw = String(jid || '');
+    const id = raw.replace(/@.*/, '');
+    const suffix = raw.endsWith('@g.us') ? '@g' : '';
+    if (id.length <= 6) return (id || '-') + suffix;
+    return `${id.slice(0, 4)}***${id.slice(-3)}${suffix}`;
 }
 
 function compactActivity(message) {
@@ -203,18 +206,29 @@ function hasSavedSession() {
     }
 }
 
+function parseTarget(line) {
+    const raw = String(line || '').trim();
+    if (!raw || raw.startsWith('#')) return null;
+
+    const lower = raw.toLowerCase();
+    if (lower.endsWith('@g.us')) {
+        const groupId = raw.replace(/\s+/g, '');
+        return groupId.includes('-') ? groupId : null;
+    }
+
+    let nomor = raw.replace(/[^0-9]/g, '');
+    if (nomor.startsWith('0')) nomor = '62' + nomor.slice(1);
+    if (nomor.length < 9) return null;
+    return nomor + '@s.whatsapp.net';
+}
+
 function loadTargets() {
     if (!fs.existsSync(HISTORY_FILE)) return [];
 
     return fs.readFileSync(HISTORY_FILE, 'utf-8')
         .split('\n')
-        .map(x => x.trim())
-        .filter(x => x.length > 8)
-        .map(x => {
-            let nomor = x.replace(/[^0-9]/g, '');
-            if (nomor.startsWith('0')) nomor = '62' + nomor.slice(1);
-            return nomor + '@s.whatsapp.net';
-        });
+        .map(parseTarget)
+        .filter(Boolean);
 }
 
 let success = 0;
@@ -272,6 +286,31 @@ async function waitWithLoading(ms, label = 'Next message', keepRunning = () => t
     process.stdout.write('\x1b[2K');
     process.stdout.write('\r');
     return true;
+}
+async function printGroupList(sock) {
+    logActivity('Loading group list');
+
+    const groups = await sock.groupFetchAllParticipating();
+    const list = Object.values(groups || {})
+        .sort((a, b) => String(a.subject || '').localeCompare(String(b.subject || '')));
+
+    console.log('');
+    console.log('GROUP LIST');
+    console.log('----------------------------------------');
+
+    if (!list.length) {
+        console.log('No joined group found for this account.');
+        return;
+    }
+
+    list.forEach((group, index) => {
+        const name = group.subject || '-';
+        console.log(`${index + 1}. ${name}`);
+        console.log(`   ${group.id}`);
+    });
+
+    console.log('');
+    console.log('Tambahkan JID group ke menu TAMBAH TARGET atau nomor_wa.txt.');
 }
 async function sendHuman(sock, jid) {
     if (!shouldReply()) return false;
@@ -393,6 +432,13 @@ async function startBot() {
                 if (!MULTI_RUN) console.clear();
                 console.log(color.green + `BOT CONNECTED [${SESSION_NAME}]\n` + color.reset);
                 logActivity('Connected and ready');
+
+                if (LIST_GROUPS) {
+                    printGroupList(sock)
+                        .catch((err) => console.log(color.red + 'LIST GROUP ERROR: ' + (err?.message || err) + color.reset))
+                        .finally(() => setTimeout(() => process.exit(0), 500));
+                    return;
+                }
 
                 startWarming(sock, runId).catch((err) => {
                     console.log(color.red + 'BOT ERROR: ' + (err?.message || err) + color.reset);

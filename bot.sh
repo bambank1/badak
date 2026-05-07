@@ -404,23 +404,27 @@ auto_loop() {
 
 view_nomor() {
     ensure_files
+    echo "Target tersimpan:"
+    echo "- Nomor: 628xxxx atau 08xxxx"
+    echo "- Group: 1203xxxx@g.us"
+    echo ""
     cat nomor_wa.txt
     pause
 }
 
 tambah_nomor() {
     ensure_files
-    read -r -p "Number: " n
+    read -r -p "Target number/group JID: " n
     if [ -n "$n" ]; then
         echo "$n" >> nomor_wa.txt
-        echo "Number added."
+        echo "Target added."
     fi
     sleep 1
 }
 
 hapus_nomor() {
     ensure_files
-    read -r -p "Delete number: " n
+    read -r -p "Delete target: " n
     if [ -z "$n" ]; then
         echo "Empty input."
         sleep 1
@@ -430,7 +434,7 @@ hapus_nomor() {
     tmp_file="$(mktemp)"
     grep -Fv -- "$n" nomor_wa.txt > "$tmp_file" || true
     mv "$tmp_file" nomor_wa.txt
-    echo "Number deleted if it existed."
+    echo "Target deleted if it existed."
     sleep 1
 }
 
@@ -537,6 +541,11 @@ update_script() {
     echo "Note  : sessions, logs, and nomor_wa.txt were not changed"
     pause
 }
+list_group() {
+    ensure_files
+    RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" LIST_GROUPS=1 SESSION="$SESSION" node index.js
+    pause
+}
 edit_message() { edit_file messages.js; }
 edit_config() { edit_file config.js; }
 edit_nomor() { ensure_files; edit_file nomor_wa.txt; }
@@ -548,17 +557,18 @@ show_menu() {
     echo "[4]  CLEAR SESSION"
     echo "[5]  TOGGLE MULTI MODE"
     echo ""
-    echo "[6]  VIEW NOMOR"
-    echo "[7]  TAMBAH NOMOR"
-    echo "[8]  HAPUS NOMOR"
+    echo "[6]  VIEW TARGET"
+    echo "[7]  TAMBAH TARGET"
+    echo "[8]  HAPUS TARGET"
     echo "[9]  CLEAN DUPLIKAT"
     echo ""
     echo "[10] EDIT MESSAGE"
     echo "[11] EDIT CONFIG"
-    echo "[12] EDIT NOMOR"
+    echo "[12] EDIT TARGET"
     echo ""
     echo "[13] AUTO INSTALLER"
     echo "[14] UPDATE SCRIPT"
+    echo "[15] LIST GROUP"
     echo ""
     echo "[0]  EXIT"
     echo ""
@@ -589,6 +599,7 @@ while true; do
         12) edit_nomor ;;
         13) auto_install ;;
         14) update_script ;;
+        15) list_group ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
