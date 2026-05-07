@@ -26,6 +26,8 @@ NC='\033[0m'
 
 SESSION=${SESSION:-default}
 MULTI_MODE=0
+MULTI_DELAY_MIN=30
+MULTI_DELAY_MAX=120
 LOOP_MODE=0
 
 pause() {
@@ -189,6 +191,7 @@ header() {
 
     if [ "$MULTI_MODE" -eq 1 ]; then
         echo -e "Multi Mode : ${GREEN}ON${NC}"
+        echo -e "Session Gap: ${YELLOW}random ${MULTI_DELAY_MIN}-${MULTI_DELAY_MAX}s${NC}"
     else
         echo -e "Multi Mode : ${RED}OFF${NC}"
     fi
@@ -198,8 +201,39 @@ header() {
 
 toggle_multi_mode() {
     if [ "$MULTI_MODE" -eq 0 ]; then
+        read -r -p "Delay antar session minimum detik [30]: " min_gap
+        read -r -p "Delay antar session maximum detik [120]: " max_gap
+
+        min_gap=${min_gap:-30}
+        max_gap=${max_gap:-120}
+
+        case "$min_gap" in
+            ''|*[!0-9]*)
+                echo "Minimum delay harus angka."
+                sleep 1
+                return
+                ;;
+        esac
+
+        case "$max_gap" in
+            ''|*[!0-9]*)
+                echo "Maximum delay harus angka."
+                sleep 1
+                return
+                ;;
+        esac
+
+        if [ "$max_gap" -lt "$min_gap" ]; then
+            echo "Maximum delay harus lebih besar atau sama dengan minimum."
+            sleep 1
+            return
+        fi
+
+        MULTI_DELAY_MIN="$min_gap"
+        MULTI_DELAY_MAX="$max_gap"
         MULTI_MODE=1
         echo "Multi account: ON"
+        echo "Delay antar session: random ${MULTI_DELAY_MIN}-${MULTI_DELAY_MAX} detik"
     else
         MULTI_MODE=0
         echo "Multi account: OFF"
@@ -300,10 +334,16 @@ run_bot() {
         for dir in sessions/*; do
             [ -d "$dir" ] || continue
             akun="$(basename "$dir")"
-            found=1
+
+            if [ "$found" -gt 0 ]; then
+                gap=$((RANDOM % (MULTI_DELAY_MAX - MULTI_DELAY_MIN + 1) + MULTI_DELAY_MIN))
+                echo "Waiting ${gap}s before next session..."
+                sleep "$gap"
+            fi
+
+            found=$((found + 1))
             echo "Starting: $akun"
             MULTI_RUN=1 RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" SESSION="$akun" node index.js &
-            sleep $((RANDOM % 5 + 2))
         done
 
         if [ "$found" -eq 0 ]; then

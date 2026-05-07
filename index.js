@@ -6,9 +6,7 @@ if (process.env.RUN_FROM_SH !== "1") {
 process.env.BAILEYS_NO_QR = "true";
 
 if (process.env.MULTI_RUN !== '1') console.clear();
-console.log(process.env.MULTI_RUN === '1'
-    ? `Starting bot [${process.env.SESSION || 'default'}]...\n`
-    : "Starting bot...\n");
+console.log(`Starting bot [${process.env.SESSION || 'default'}]...\n`);
 
 const color = {
     reset: "\x1b[0m",
@@ -165,15 +163,14 @@ function compactActivity(message) {
         .replace(/^Auto loop next round in (\d+) seconds$/, 'next loop $1s')
         .replace(/^Waiting next message base delay (\d+)s$/, 'wait next $1s')
         .replace(/^Disconnect (.+)$/, 'disconnect $1')
+        .replace(/^Reconnect in (\d+) seconds \((.+)\)$/, 'reconnect $1s $2')
         .replace(/^Connecting\.\.\.$/, 'connecting');
 }
 
 function logActivity(message, level = 'INFO') {
     const stamp = nowStamp();
     const fileLine = `[${stamp}] [${SESSION_NAME}] [${level}] ${message}`;
-    const terminalLine = MULTI_RUN
-        ? `[${stamp.slice(11)}] ${SESSION_NAME.padEnd(8).slice(0, 8)} ${level.padEnd(5).slice(0, 5)} ${compactActivity(message)}`
-        : fileLine;
+    const terminalLine = `[${stamp.slice(11)}] ${SESSION_NAME.padEnd(8).slice(0, 8)} ${level.padEnd(5).slice(0, 5)} ${compactActivity(message)}`;
     const terminalColor = level === 'ERROR' ? color.red : level === 'WARN' ? color.yellow : color.cyan;
 
     process.stdout.write('\x1b[2K');
@@ -237,7 +234,7 @@ function renderUI(current) {
     const bar = colorBar + '#'.repeat(filled) + color.reset + '-'.repeat(barLength - filled);
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const eta = current > 0 ? Math.floor((elapsed / current) * (total - current)) : 0;
-    const prefix = MULTI_RUN ? `[${SESSION_NAME}] ` : '';
+    const prefix = `[${SESSION_NAME}] `;
     const line = `${prefix}SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
 
     process.stdout.write('\x1b[2K');
@@ -265,7 +262,7 @@ async function waitWithLoading(ms, label = 'Next message', keepRunning = () => t
         const seconds = Math.ceil(remaining / 1000);
 
         process.stdout.write('\x1b[2K');
-        const prefix = MULTI_RUN ? `[${SESSION_NAME}] ` : '';
+        const prefix = `[${SESSION_NAME}] `;
         process.stdout.write(`\r${prefix}${label} [${bar}] ${percent}% | wait ${seconds}s`);
 
         if (remaining <= 0) break;
@@ -312,7 +309,7 @@ function scheduleReconnect(reason, customDelayMs) {
     const delayMs = customDelayMs ?? Math.min(30000, 5000 + reconnectCount * 5000);
     reconnectCount++;
 
-    console.log(color.yellow + `Reconnect in ${Math.floor(delayMs / 1000)} seconds... (${reason || 'unknown'})` + color.reset);
+    logActivity(`Reconnect in ${Math.floor(delayMs / 1000)} seconds (${reason || 'unknown'})`, 'WARN');
 
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -394,9 +391,7 @@ async function startBot() {
                 warmingStarted = true;
 
                 if (!MULTI_RUN) console.clear();
-                console.log(color.green + (MULTI_RUN ? `BOT CONNECTED [${SESSION_NAME}]
-` : `BOT CONNECTED (${SESSION_NAME})
-`) + color.reset);
+                console.log(color.green + `BOT CONNECTED [${SESSION_NAME}]\n` + color.reset);
                 logActivity('Connected and ready');
 
                 startWarming(sock, runId).catch((err) => {
@@ -547,9 +542,6 @@ async function startWarming(sock, runId = activeRunId) {
 
     if (process.env.LOOP_MODE === '1') {
         const loopDelay = getLoopDelayMs();
-        if (!MULTI_RUN) {
-            console.log(color.yellow + `\nAUTO LOOP: next round without reconnect in ${Math.floor(loopDelay / 1000)} seconds.` + color.reset);
-        }
         logActivity(`Auto loop next round in ${Math.floor(loopDelay / 1000)} seconds`, 'WARN');
         const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
         if (!ok) return;
