@@ -213,7 +213,9 @@ function parseTarget(line) {
     const lower = raw.toLowerCase();
     if (lower.endsWith('@g.us')) {
         const groupId = raw.replace(/\s+/g, '');
-        return groupId.includes('-') ? groupId : null;
+        const groupNumber = groupId.replace(/@g\.us$/i, '').replace(/[^0-9-]/g, '');
+        if (groupNumber.length < 8) return null;
+        return groupNumber + '@g.us';
     }
 
     let nomor = raw.replace(/[^0-9]/g, '');
@@ -312,21 +314,39 @@ async function printGroupList(sock) {
     console.log('');
     console.log('Tambahkan JID group ke menu TAMBAH TARGET atau nomor_wa.txt.');
 }
+function isGroupJid(jid) {
+    return String(jid || '').endsWith('@g.us');
+}
+
+async function ensureGroupReady(sock, jid) {
+    if (!isGroupJid(jid)) return;
+
+    try {
+        await sock.groupMetadata(jid);
+    } catch (err) {
+        throw new Error(`Group not found or this account is not a member: ${err?.message || err}`);
+    }
+}
+
 async function sendHuman(sock, jid) {
     if (!shouldReply()) return false;
 
     for (let i = 0; i < CONFIG.retry; i++) {
         try {
             const text = randomMessage();
+            const groupTarget = isGroupJid(jid);
 
+            await ensureGroupReady(sock, jid);
             await randomHumanPause();
-            await sock.sendPresenceUpdate('composing', jid);
+
+            if (!groupTarget) await sock.sendPresenceUpdate('composing', jid);
             await delay(humanTypingDelay(text));
             await sock.sendMessage(jid, { text });
-            await sock.sendPresenceUpdate('paused', jid);
+            if (!groupTarget) await sock.sendPresenceUpdate('paused', jid);
 
             return true;
-        } catch {
+        } catch (err) {
+            logActivity(`Retry ${i + 1}/${CONFIG.retry} failed ${maskJid(jid)}: ${err?.message || err}`, 'WARN');
             await delay(3000 + Math.random() * 5000);
         }
     }

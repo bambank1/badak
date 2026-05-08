@@ -407,6 +407,7 @@ view_nomor() {
     echo "Target tersimpan:"
     echo "- Nomor: 628xxxx atau 08xxxx"
     echo "- Group: 1203xxxx@g.us"
+    echo "  Catatan: setiap akun multi mode harus sudah join ke group target."
     echo ""
     cat nomor_wa.txt
     pause
