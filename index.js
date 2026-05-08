@@ -143,7 +143,8 @@ const LOG_DIR = './logs';
 const LOG_FILE = `${LOG_DIR}/${SESSION_NAME}.log`;
 
 function nowStamp() {
-    return new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const wib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().replace('T', ' ').slice(0, 19) + ' WIB';
 }
 
 function maskJid(jid) {
@@ -251,7 +252,7 @@ function renderUI(current) {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const eta = current > 0 ? Math.floor((elapsed / current) * (total - current)) : 0;
     const prefix = `[${SESSION_NAME}] `;
-    const line = `${prefix}SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
+    const line = `[${nowStamp().slice(11)}] ${prefix}SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
 
     process.stdout.write('\x1b[2K');
     process.stdout.write('\r' + line);
@@ -279,7 +280,7 @@ async function waitWithLoading(ms, label = 'Next message', keepRunning = () => t
 
         process.stdout.write('\x1b[2K');
         const prefix = `[${SESSION_NAME}] `;
-        process.stdout.write(`\r${prefix}${label} [${bar}] ${percent}% | wait ${seconds}s`);
+        process.stdout.write(`\r[${nowStamp().slice(11)}] ${prefix}${label} [${bar}] ${percent}% | wait ${seconds}s`);
 
         if (remaining <= 0) break;
         await delay(Math.min(1000, remaining));
@@ -450,7 +451,7 @@ async function startBot() {
                 warmingStarted = true;
 
                 if (!MULTI_RUN) console.clear();
-                console.log(color.green + `BOT CONNECTED [${SESSION_NAME}]\n` + color.reset);
+                console.log(color.green + `[${nowStamp().slice(11)}] BOT CONNECTED [${SESSION_NAME}]\n` + color.reset);
                 logActivity('Connected and ready');
 
                 if (LIST_GROUPS) {
