@@ -22,6 +22,8 @@ WA BOT PANEL PRO adalah script bot WhatsApp berbasis Node.js dengan panel termin
 - Clear session untuk login ulang
 - Clean duplicate target
 - Support target campuran: nomor pribadi dan grup
+- Menu Donasi QRIS dengan gambar dari link GitHub
+- Fallback otomatis membuka QRIS di browser jika gambar tidak terbuka
 
 ## Struktur File
 
@@ -239,10 +241,39 @@ logs/
 [13] AUTO INSTALLER
 [14] UPDATE SCRIPT
 [15] LIST GROUP
+[16] DONASI QRIS
 
 [0]  EXIT
 ```
 
+
+## Donasi QRIS
+
+Pilih menu:
+
+```text
+[16] DONASI QRIS
+```
+
+Menu ini akan menampilkan link QRIS dan mencoba mengunduh gambar QRIS ke file:
+
+```text
+qris_donasi.jpg
+```
+
+Setelah gambar berhasil diunduh, script akan mencoba membuka gambar secara otomatis:
+
+- Termux menggunakan `termux-open`
+- Ubuntu/Linux menggunakan `xdg-open`
+
+Jika gambar tidak bisa terbuka otomatis, script akan mengalihkan ke browser menggunakan salah satu perintah yang tersedia:
+
+- `termux-open-url`
+- `xdg-open`
+- `sensible-browser`
+- `wslview`
+
+Jika browser juga tidak tersedia, link QRIS tetap ditampilkan agar bisa dibuka secara manual.
 ## Update Script
 
 Pilih menu:

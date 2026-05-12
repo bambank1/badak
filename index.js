@@ -118,6 +118,7 @@ function shouldReply() {
 }
 
 const lastChat = {};
+const lastIncomingMessages = {};
 
 function canSend(jid) {
     const now = Date.now();
@@ -315,6 +316,21 @@ async function printGroupList(sock) {
     console.log('');
     console.log('Tambahkan JID group ke menu TAMBAH TARGET atau nomor_wa.txt.');
 }
+function rememberIncomingMessage(message) {
+    const jid = message?.key?.remoteJid;
+    if (!jid || message?.key?.fromMe) return;
+    lastIncomingMessages[jid] = message.key;
+}
+
+async function markChatReadBeforeTyping(sock, jid) {
+    const key = lastIncomingMessages[jid];
+    if (!key || typeof sock.readMessages !== 'function') return false;
+
+    await sock.readMessages([key]);
+    logActivity(`Marked read before typing: ${maskJid(jid)}`);
+    await delay(randomDelay(800, 2500));
+    return true;
+}
 function isGroupJid(jid) {
     return String(jid || '').endsWith('@g.us');
 }
@@ -339,6 +355,7 @@ async function sendHuman(sock, jid) {
 
             await ensureGroupReady(sock, jid);
             await randomHumanPause();
+            await markChatReadBeforeTyping(sock, jid);
 
             if (!groupTarget) await sock.sendPresenceUpdate('composing', jid);
             await delay(humanTypingDelay(text));
@@ -358,15 +375,26 @@ async function sendHuman(sock, jid) {
 let isRunning = false;
 let reconnectTimer = null;
 let reconnectCount = 0;
+let forbiddenCount = 0;
 let selectedLoginMethod = null;
 let activeRunId = 0;
 let connectionAlive = false;
+
+function getForbiddenCooldownMs() {
+    const shortMin = Number(CONFIG.forbiddenCooldownMin || 600000);
+    const shortMax = Number(CONFIG.forbiddenCooldownMax || 1200000);
+    const longMin = Number(CONFIG.forbiddenLongCooldownMin || 1800000);
+    const longMax = Number(CONFIG.forbiddenLongCooldownMax || 3600000);
+
+    if (forbiddenCount >= 3) return randomDelay(longMin, longMax);
+    return randomDelay(shortMin, shortMax);
+}
 
 function scheduleReconnect(reason, customDelayMs) {
     if (reconnectTimer) return;
 
     isRunning = false;
-    const delayMs = customDelayMs ?? Math.min(30000, 5000 + reconnectCount * 5000);
+    const delayMs = customDelayMs ?? Math.min(300000, 5000 + reconnectCount * 15000);
     reconnectCount++;
 
     logActivity(`Reconnect in ${Math.floor(delayMs / 1000)} seconds (${reason || 'unknown'})`, 'WARN');
@@ -412,6 +440,9 @@ async function startBot() {
         });
 
         sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('messages.upsert', ({ messages }) => {
+            for (const message of messages || []) rememberIncomingMessage(message);
+        });
         let warmingStarted = false;
         let authReady = sock.authState.creds.registered;
         let lastQr = '';
@@ -446,6 +477,7 @@ async function startBot() {
                 connectionAlive = true;
                 isRunning = true;
                 reconnectCount = 0;
+                forbiddenCount = 0;
 
                 if (warmingStarted) return;
                 warmingStarted = true;
@@ -484,6 +516,14 @@ async function startBot() {
                 if (reason === DisconnectReason.restartRequired || reason === 515) {
                     logActivity('Restarting connection, keep scanning/waiting...', 'WARN');
                     scheduleReconnect('restart required', 1000);
+                    return;
+                }
+
+                if (reason === 403) {
+                    forbiddenCount++;
+                    const cooldown = getForbiddenCooldownMs();
+                    logActivity(`403 cooldown ${Math.floor(cooldown / 1000)}s. Account may need rest or session check.`, 'WARN');
+                    scheduleReconnect('403 cooldown', cooldown);
                     return;
                 }
 

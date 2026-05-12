@@ -547,6 +547,75 @@ list_group() {
     RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" LIST_GROUPS=1 SESSION="$SESSION" node index.js
     pause
 }
+open_qris_browser() {
+    url="$1"
+
+    if need_cmd termux-open-url; then
+        termux-open-url "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd xdg-open; then
+        xdg-open "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd sensible-browser; then
+        sensible-browser "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd wslview; then
+        wslview "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    return 1
+}
+
+donasi_qris() {
+    qris_url="https://raw.githubusercontent.com/bambank1/Qris/refs/heads/main/IMG-20250506-WA0005.jpg"
+    qris_file="qris_donasi.jpg"
+    opened=0
+
+    clear
+    echo "============================================================"
+    echo "                         DONASI QRIS                         "
+    echo "============================================================"
+    echo "Link QRIS: $qris_url"
+    echo ""
+
+    if need_cmd curl; then
+        echo "Mengunduh gambar QRIS..."
+        if curl -L --fail --silent --show-error "$qris_url" -o "$qris_file"; then
+            echo "QRIS tersimpan: $qris_file"
+            echo ""
+
+            if need_cmd termux-open; then
+                if termux-open "$qris_file" >/dev/null 2>&1; then
+                    echo "Membuka gambar QRIS dengan Termux."
+                    opened=1
+                fi
+            elif need_cmd xdg-open; then
+                if xdg-open "$qris_file" >/dev/null 2>&1; then
+                    echo "Membuka gambar QRIS dengan aplikasi gambar."
+                    opened=1
+                fi
+            fi
+        else
+            echo "Gagal mengunduh QRIS."
+        fi
+    else
+        echo "curl belum tersedia."
+    fi
+
+    if [ "$opened" -ne 1 ]; then
+        echo "Gambar tidak terbuka otomatis. Mengalihkan ke browser..."
+        if open_qris_browser "$qris_url"; then
+            echo "Browser dibuka untuk menampilkan QRIS."
+        else
+            echo "Browser tidak tersedia. Buka link QRIS di atas secara manual."
+        fi
+    fi
+
+    pause
+}
 edit_message() { edit_file messages.js; }
 edit_config() { edit_file config.js; }
 edit_nomor() { ensure_files; edit_file nomor_wa.txt; }
@@ -570,6 +639,7 @@ show_menu() {
     echo "[13] AUTO INSTALLER"
     echo "[14] UPDATE SCRIPT"
     echo "[15] LIST GROUP"
+    echo "[16] DONASI QRIS"
     echo ""
     echo "[0]  EXIT"
     echo ""
@@ -601,6 +671,7 @@ while true; do
         13) auto_install ;;
         14) update_script ;;
         15) list_group ;;
+        16) donasi_qris ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
