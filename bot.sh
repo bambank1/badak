@@ -1,662 +1,98 @@
 #!/usr/bin/env bash
-
-# WA BOT PANEL PRO - Termux/Ubuntu friendly
-# ASCII-only output to avoid broken characters on different terminals.
-
-LOGIN_KEY="n"
-APP_NAME="WA BOT PANEL PRO"
-VERSION="v3.2 TERMUX UBUNTU"
-DEVELOPER="Nyipto Nanda Dev"
-UPDATE_REPO="https://github.com/bambank1/badak"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR" || {
-    echo "Failed to enter script folder: $SCRIPT_DIR"
+# Protected build - source is packed with gzip+base64.
+# Original backup: bot.source.sh
+_payload='
+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
+CSDT58Z1Js/7/BsOAqZk9EIAAA==
+'
+if ! command -v base64 >/dev/null 2>&1; then
+    echo "base64 command not found. Run AUTO INSTALLER or install coreutils."
     exit 1
-}
-
-export LANG="${LANG:-C.UTF-8}"
-export LC_ALL="${LC_ALL:-C.UTF-8}"
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-SESSION=${SESSION:-default}
-MULTI_MODE=0
-MULTI_DELAY_MIN=30
-MULTI_DELAY_MAX=120
-LOOP_MODE=0
-
-pause() {
-    echo ""
-    read -r -p "Press Enter to continue... " _
-}
-
-ensure_files() {
-    mkdir -p sessions
-    touch nomor_wa.txt
-}
-
-need_cmd() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-mask_repo_url() {
-    url="$1"
-    url="${url#https://github.com/}"
-    owner="${url%%/*}"
-    repo="${url#*/}"
-
-    owner_mask="${owner:0:2}***${owner: -1}"
-    repo_mask="${repo:0:2}***${repo: -1}"
-
-    echo "https://github.com/${owner_mask}/${repo_mask}"
-}
-run_quiet() {
-    "$@" >/dev/null 2>&1
-}
-
-normalize_file() {
-    file="$1"
-    [ -f "$file" ] || return 0
-
-    if need_cmd sed; then
-        sed -i 's/\r$//' "$file" 2>/dev/null || true
-    else
-        tmp_file="${file}.tmp"
-        tr -d '\r' < "$file" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$file"
-    fi
-}
-
-apt_install() {
-    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
-        apt-get update -y
-        apt-get install -y "$@"
-    elif need_cmd sudo; then
-        sudo apt-get update -y
-        sudo apt-get install -y "$@"
-    else
-        echo "sudo not found. Run this installer as root, or install manually: $*"
-        return 1
-    fi
-}
-
-auto_install() {
-    clear
-    echo "============================================================"
-    echo "                    AUTO INSTALLER"
-    echo "============================================================"
-    cd "$SCRIPT_DIR" || return 1
-
-    if need_cmd pkg; then
-        echo "[1/5] Environment : Termux"
-        echo "[2/5] Checking packages..."
-        run_quiet pkg update -y
-        need_cmd node || run_quiet pkg install nodejs-lts -y || run_quiet pkg install nodejs -y
-        need_cmd git || run_quiet pkg install git -y
-    elif need_cmd apt-get; then
-        echo "[1/5] Environment : Ubuntu/Debian"
-        echo "[2/5] Checking system packages..."
-        need_cmd node || run_quiet apt_install nodejs npm
-        need_cmd npm || run_quiet apt_install npm
-        need_cmd git || run_quiet apt_install git
-    else
-        echo "[1/5] Environment : Unknown"
-        echo "No pkg or apt-get found. Install Node.js and npm manually first."
-    fi
-
-    if ! need_cmd node; then
-        echo "FAILED: Node.js is not installed."
-        pause
-        return 1
-    fi
-
-    if ! need_cmd npm; then
-        echo "FAILED: npm is not installed."
-        pause
-        return 1
-    fi
-
-    echo "[3/5] Preparing project files..."
-    ensure_files
-
-    if [ ! -f package.json ]; then
-        npm init -y >/dev/null 2>&1
-    fi
-
-    npm pkg set main="index.js" type="commonjs" scripts.start="node index.js" >/dev/null 2>&1 || true
-    npm config set fund false >/dev/null 2>&1 || true
-    npm config set audit false >/dev/null 2>&1 || true
-
-    echo "[4/5] Installing bot modules..."
-    if npm install @whiskeysockets/baileys pino qrcode-terminal qrcode --no-audit --no-fund --silent >/dev/null 2>&1; then
-        echo "      Modules ready."
-    else
-        echo "FAILED: Module install failed."
-        pause
-        return 1
-    fi
-
-    echo "[5/5] Checking PM2..."
-    if ! need_cmd pm2; then
-        npm install -g pm2 --no-audit --no-fund --silent </dev/null >/dev/null 2>&1 || npm install pm2 --save-dev --no-audit --no-fund --silent </dev/null >/dev/null 2>&1
-    fi
-
-    echo ""
-    echo "============================================================"
-    echo "Install summary"
-    echo "============================================================"
-    echo "Node : $(node --version 2>/dev/null)"
-    echo "npm  : $(npm --version 2>/dev/null)"
-
-    if need_cmd pm2; then
-        echo "PM2     : $(pm2 --version 2>/dev/null)"
-    elif [ -x "./node_modules/.bin/pm2" ]; then
-        echo "PM2     : local (use npx pm2)"
-    else
-        echo "PM2  : not installed, RUN BOT can still use node"
-    fi
-
-    echo "Bot modules: ready"
-    echo "Status     : complete"
-    pause
-}
-
-login_gate() {
-    clear
-    echo "LOGIN REQUIRED"
-    read -r -p "Enter key: " input
-
-    if [ "$input" != "$LOGIN_KEY" ]; then
-        echo "Wrong key."
-        exit 1
-    fi
-
-    echo "Access granted."
-    sleep 1
-}
-
-header() {
-    clear
-    echo -e "${GREEN}============================================================${NC}"
-    echo -e "${GREEN}                    WA BOT PANEL PRO                       ${NC}"
-    echo -e "${GREEN}============================================================${NC}"
-    echo -e "App        : ${CYAN}$APP_NAME${NC}"
-    echo -e "Account    : ${YELLOW}$SESSION${NC}"
-    echo -e "Developer  : ${GREEN}$DEVELOPER${NC}"
-    echo -e "Version    : ${CYAN}$VERSION${NC}"
-
-    if [ "$MULTI_MODE" -eq 1 ]; then
-        echo -e "Multi Mode : ${GREEN}ON${NC}"
-        echo -e "Session Gap: ${YELLOW}random ${MULTI_DELAY_MIN}-${MULTI_DELAY_MAX}s${NC}"
-    else
-        echo -e "Multi Mode : ${RED}OFF${NC}"
-    fi
-
-    echo ""
-}
-
-toggle_multi_mode() {
-    if [ "$MULTI_MODE" -eq 0 ]; then
-        read -r -p "Delay antar session minimum detik [30]: " min_gap
-        read -r -p "Delay antar session maximum detik [120]: " max_gap
-
-        min_gap=${min_gap:-30}
-        max_gap=${max_gap:-120}
-
-        case "$min_gap" in
-            ''|*[!0-9]*)
-                echo "Minimum delay harus angka."
-                sleep 1
-                return
-                ;;
-        esac
-
-        case "$max_gap" in
-            ''|*[!0-9]*)
-                echo "Maximum delay harus angka."
-                sleep 1
-                return
-                ;;
-        esac
-
-        if [ "$max_gap" -lt "$min_gap" ]; then
-            echo "Maximum delay harus lebih besar atau sama dengan minimum."
-            sleep 1
-            return
-        fi
-
-        MULTI_DELAY_MIN="$min_gap"
-        MULTI_DELAY_MAX="$max_gap"
-        MULTI_MODE=1
-        echo "Multi account: ON"
-        echo "Delay antar session: random ${MULTI_DELAY_MIN}-${MULTI_DELAY_MAX} detik"
-    else
-        MULTI_MODE=0
-        echo "Multi account: OFF"
-    fi
-    sleep 1
-}
-
-choose_account() {
-    ensure_files
-    echo ""
-    echo "Account list:"
-    find sessions -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || ls sessions 2>/dev/null
-
-    echo ""
-    read -r -p "Account name: " name
-
-    if [ -z "$name" ]; then
-        echo "Name cannot be empty."
-        sleep 1
-        return
-    fi
-
-    SESSION="$name"
-    export SESSION
-    mkdir -p "sessions/$SESSION"
-
-    echo "Active account: $SESSION"
-    sleep 1
-}
-
-clear_session() {
-    ensure_files
-    echo ""
-    echo "Session list:"
-    find sessions -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || ls sessions 2>/dev/null
-
-    echo ""
-    read -r -p "Session name (or all): " target
-
-    if [ -z "$target" ]; then
-        echo "Empty input."
-        sleep 1
-        return
-    fi
-
-    if [ "$target" = "all" ]; then
-        read -r -p "Delete ALL sessions? (y/n): " confirm_all
-        if [ "$confirm_all" = "y" ] || [ "$confirm_all" = "Y" ]; then
-            rm -rf sessions/*
-            echo "All sessions deleted."
-        else
-            echo "Cancelled."
-        fi
-        sleep 1
-        return
-    fi
-
-    if [ ! -d "sessions/$target" ]; then
-        echo "Session not found."
-        sleep 1
-        return
-    fi
-
-    read -r -p "Delete session '$target'? (y/n): " confirm
-    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-        rm -rf "sessions/$target"
-        echo "Session deleted."
-    else
-        echo "Cancelled."
-    fi
-
-    sleep 1
-}
-
-run_one_bot() {
-    RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" SESSION="$1" node index.js
-}
-
-run_bot() {
-    ensure_files
-
-    if ! need_cmd node; then
-        echo "Node.js not found. Run AUTO INSTALLER first."
-        pause
-        return
-    fi
-
-    if [ ! -f index.js ]; then
-        echo "index.js not found in: $SCRIPT_DIR"
-        pause
-        return
-    fi
-
-    if [ "$MULTI_MODE" -eq 1 ]; then
-        echo "Multi account mode active..."
-        found=0
-
-        for dir in sessions/*; do
-            [ -d "$dir" ] || continue
-            akun="$(basename "$dir")"
-
-            if [ "$found" -gt 0 ]; then
-                gap=$((RANDOM % (MULTI_DELAY_MAX - MULTI_DELAY_MIN + 1) + MULTI_DELAY_MIN))
-                echo "Waiting ${gap}s before next session..."
-                sleep "$gap"
-            fi
-
-            found=$((found + 1))
-            echo "Starting: $akun"
-            MULTI_RUN=1 RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" SESSION="$akun" node index.js &
-        done
-
-        if [ "$found" -eq 0 ]; then
-            echo "No session found. Create/select an account first."
-            sleep 1
-            return
-        fi
-
-        wait
-    else
-        run_one_bot "$SESSION"
-    fi
-
-    if [ "$LOOP_MODE" != "1" ]; then
-        sleep 1
-    fi
-}
-
-auto_loop() {
-    read -r -p "Loop random minimum seconds: " min_d
-    case "$min_d" in
-        ''|*[!0-9]*)
-            echo "Minimum delay must be a number."
-            sleep 1
-            return
-            ;;
-    esac
-
-    read -r -p "Loop random maximum seconds: " max_d
-    case "$max_d" in
-        ''|*[!0-9]*)
-            echo "Maximum delay must be a number."
-            sleep 1
-            return
-            ;;
-    esac
-
-    if [ "$max_d" -lt "$min_d" ]; then
-        echo "Maximum delay must be greater than or equal to minimum delay."
-        sleep 1
-        return
-    fi
-
-    clear
-    echo "AUTO LOOP ACTIVE"
-    echo "Delay: random ${min_d}-${max_d} seconds"
-    echo "Loop berjalan di dalam koneksi bot, jadi tidak reconnect tiap putaran."
-    echo ""
-
-    export LOOP_MODE=1
-    export LOOP_DELAY_MIN="$min_d"
-    export LOOP_DELAY_MAX="$max_d"
-    run_bot
-    LOOP_MODE=0
-    unset LOOP_DELAY_MIN
-    unset LOOP_DELAY_MAX
-}
-
-view_nomor() {
-    ensure_files
-    echo "Target tersimpan:"
-    echo "- Nomor: 628xxxx atau 08xxxx"
-    echo "- Group: 1203xxxx@g.us"
-    echo "  Catatan: setiap akun multi mode harus sudah join ke group target."
-    echo ""
-    cat nomor_wa.txt
-    pause
-}
-
-tambah_nomor() {
-    ensure_files
-    read -r -p "Target number/group JID: " n
-    if [ -n "$n" ]; then
-        echo "$n" >> nomor_wa.txt
-        echo "Target added."
-    fi
-    sleep 1
-}
-
-hapus_nomor() {
-    ensure_files
-    read -r -p "Delete target: " n
-    if [ -z "$n" ]; then
-        echo "Empty input."
-        sleep 1
-        return
-    fi
-
-    tmp_file="$(mktemp)"
-    grep -Fv -- "$n" nomor_wa.txt > "$tmp_file" || true
-    mv "$tmp_file" nomor_wa.txt
-    echo "Target deleted if it existed."
-    sleep 1
-}
-
-clean_duplikat() {
-    ensure_files
-    sort -u nomor_wa.txt -o nomor_wa.txt
-    echo "Duplicates cleaned."
-    sleep 1
-}
-
-edit_file() {
-    file="$1"
-    if need_cmd nano; then
-        nano "$file"
-    elif need_cmd vi; then
-        vi "$file"
-    else
-        echo "No editor found. Install nano or vi."
-        pause
-    fi
-}
-
-update_script() {
-    clear
-    echo "============================================================"
-    echo "                    UPDATE SCRIPT"
-    echo "============================================================"
-    cd "$SCRIPT_DIR" || return 1
-
-    if ! need_cmd git; then
-        echo "FAILED: git is not installed. Run AUTO INSTALLER first."
-        pause
-        return 1
-    fi
-
-    echo "[1/5] Source repo : $(mask_repo_url "$UPDATE_REPO")"
-    update_tmp=".update_tmp_badak"
-    rm -rf "$update_tmp"
-
-    echo "[2/5] Downloading latest script..."
-    if ! git clone --depth 1 "$UPDATE_REPO" "$update_tmp" >/dev/null 2>&1; then
-        echo "FAILED: Cannot download update from GitHub."
-        echo "Check internet connection or repo URL."
-        rm -rf "$update_tmp"
-        pause
-        return 1
-    fi
-
-    echo "[3/5] Applying script files..."
-    copied=0
-    for file in bot.sh index.js auth.js config.js messages.js; do
-        if [ -f "$update_tmp/$file" ]; then
-            cp "$update_tmp/$file" "$file"
-            normalize_file "$file"
-            copied=$((copied + 1))
-            echo "      updated: $file"
-        fi
-    done
-
-    if [ "$copied" -eq 0 ]; then
-        echo "FAILED: No known script files found in repo."
-        rm -rf "$update_tmp"
-        pause
-        return 1
-    fi
-
-    rm -rf "$update_tmp"
-    normalize_file bot.sh
-    chmod +x bot.sh 2>/dev/null || true
-
-    if ! need_cmd npm; then
-        echo "FAILED: npm is not installed. Run AUTO INSTALLER first."
-        pause
-        return 1
-    fi
-
-    echo "[4/5] Updating bot modules..."
-    if npm install @whiskeysockets/baileys@latest pino@latest qrcode-terminal@latest qrcode@latest --no-audit --no-fund --silent >/dev/null 2>&1; then
-        echo "      Modules updated."
-    else
-        echo "      Module update failed. Keeping current modules."
-    fi
-
-    echo "[5/5] Refreshing project settings..."
-    npm pkg set main="index.js" type="commonjs" scripts.start="node index.js" >/dev/null 2>&1 || true
-
-    echo ""
-    echo "============================================================"
-    echo "Update summary"
-    echo "============================================================"
-    echo "Version : $VERSION"
-    echo "Repo    : $(mask_repo_url "$UPDATE_REPO")"
-    echo "Files   : $copied updated"
-    echo "Node    : $(node --version 2>/dev/null || echo '-')"
-    echo "npm     : $(npm --version 2>/dev/null || echo '-')"
-    if need_cmd pm2; then
-        echo "PM2     : $(pm2 --version 2>/dev/null)"
-    elif [ -x "./node_modules/.bin/pm2" ]; then
-        echo "PM2     : local (use npx pm2)"
-    else
-        echo "PM2     : not installed"
-    fi
-    echo "Status: update complete"
-    echo "Note  : sessions, logs, and nomor_wa.txt were not changed"
-    pause
-}
-list_group() {
-    ensure_files
-    RUN_FROM_SH=1 NODE_NO_WARNINGS=1 NODE_OPTIONS="--no-warnings" LIST_GROUPS=1 SESSION="$SESSION" node index.js
-    pause
-}
-open_qris_browser() {
-    url="$1"
-
-    if need_cmd termux-open-url; then
-        termux-open-url "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd wslview; then
-        wslview "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd powershell.exe; then
-        powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd cmd.exe; then
-        cmd.exe /c start "" "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd explorer.exe; then
-        explorer.exe "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd xdg-open; then
-        xdg-open "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd sensible-browser; then
-        sensible-browser "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    return 1
-}
-
-donasi_qris() {
-    qris_url="https://raw.githubusercontent.com/bambank1/Qris/refs/heads/main/IMG-20250506-WA0005.jpg"
-
-    clear
-    echo "============================================================"
-    echo "                         DONASI QRIS                         "
-    echo "============================================================"
-    echo "Membuka QRIS di browser..."
-    echo "Link QRIS: $qris_url"
-    echo ""
-
-    if open_qris_browser "$qris_url"; then
-        echo "Browser dibuka untuk menampilkan QRIS."
-    else
-        echo "Browser tidak tersedia. Buka link QRIS di atas secara manual."
-    fi
-
-    pause
-}
-edit_message() { edit_file messages.js; }
-edit_config() { edit_file config.js; }
-edit_nomor() { ensure_files; edit_file nomor_wa.txt; }
-
-show_menu() {
-    echo "[1]  RUN BOT"
-    echo "[2]  AUTO LOOP"
-    echo "[3]  PILIH AKUN"
-    echo "[4]  CLEAR SESSION"
-    echo "[5]  TOGGLE MULTI MODE"
-    echo ""
-    echo "[6]  VIEW TARGET"
-    echo "[7]  TAMBAH TARGET"
-    echo "[8]  HAPUS TARGET"
-    echo "[9]  CLEAN DUPLIKAT"
-    echo ""
-    echo "[10] EDIT MESSAGE"
-    echo "[11] EDIT CONFIG"
-    echo "[12] EDIT TARGET"
-    echo ""
-    echo "[13] AUTO INSTALLER"
-    echo "[14] UPDATE SCRIPT"
-    echo "[15] LIST GROUP"
-    echo "[16] DONASI QRIS"
-    echo ""
-    echo "[0]  EXIT"
-    echo ""
-    echo "Masukkan nomor menu, lalu tekan Enter."
-    echo ""
-}
-
-login_gate
-ensure_files
-
-while true; do
-    header
-    show_menu
-    read -r -p ">> " pilih
-
-    case "$pilih" in
-        1) LOOP_MODE=0; run_bot ;;
-        2) auto_loop ;;
-        3) choose_account ;;
-        4) clear_session ;;
-        5) toggle_multi_mode ;;
-        6) view_nomor ;;
-        7) tambah_nomor ;;
-        8) hapus_nomor ;;
-        9) clean_duplikat ;;
-        10) edit_message ;;
-        11) edit_config ;;
-        12) edit_nomor ;;
-        13) auto_install ;;
-        14) update_script ;;
-        15) list_group ;;
-        16) donasi_qris ;;
-        0) exit 0 ;;
-        *) echo "Invalid option."; sleep 1 ;;
-    esac
-done
+fi
+if ! command -v gzip >/dev/null 2>&1; then
+    echo "gzip command not found. Run AUTO INSTALLER or install gzip."
+    exit 1
+fi
+eval "$(printf '%s' "$_payload" | base64 -d | gzip -dc)"

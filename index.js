@@ -1,742 +1,133 @@
-if (process.env.RUN_FROM_SH !== "1") {
-    console.log("\n[!] Gunakan bot.sh\n");
-    process.exit(1);
-}
-
-process.env.BAILEYS_NO_QR = "true";
-
-if (process.env.MULTI_RUN !== '1') console.clear();
-console.log(`Starting bot [${process.env.SESSION || 'default'}]...\n`);
-
-const color = {
-    reset: "\x1b[0m",
-    green: "\x1b[32m",
-    red: "\x1b[31m",
-    yellow: "\x1b[33m",
-    cyan: "\x1b[36m"
-};
-
-const hiddenLogPatterns = [
-    'Buffer',
-    'SessionEntry',
-    'Closing open session',
-    'open session in favor of incoming prekey bundle',
-    'Decrypted',
-    '_chains',
-    'preKey',
-    'pubKey',
-    'privKey'
-];
-
-function shouldHideLog(chunk) {
-    const str = chunk.toString();
-    return hiddenLogPatterns.some(pattern => str.includes(pattern));
-}
-
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
-
-process.stdout.write = (chunk, encoding, callback) => {
-    if (shouldHideLog(chunk)) return true;
-    return originalStdoutWrite(chunk, encoding, callback);
-};
-
-process.stderr.write = (chunk, encoding, callback) => {
-    if (shouldHideLog(chunk)) return true;
-    return originalStderrWrite(chunk, encoding, callback);
-};
-
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    fetchLatestBaileysVersion,
-    Browsers,
-    DisconnectReason
-} = require('@whiskeysockets/baileys');
-
-const pino = require('pino');
-const fs = require('fs');
-const readline = require('readline');
-const { spawnSync } = require('child_process');
-let qrcodeTerminal = null;
-try {
-    qrcodeTerminal = require('qrcode-terminal');
-} catch {
-    qrcodeTerminal = null;
-}
-
-let qrcodeImage = null;
-try {
-    qrcodeImage = require('qrcode');
-} catch {
-    qrcodeImage = null;
-}
-
-const CONFIG = require('./config');
-const { randomMessage } = require('./messages');
-const { chooseLoginMethod, handleAuth } = require('./auth');
-
-process.on('uncaughtException', (err) => {
-    console.log(color.red + 'ERROR: ' + (err?.message || err) + color.reset);
-});
-
-process.on('unhandledRejection', (err) => {
-    console.log(color.red + 'PROMISE ERROR: ' + (err?.message || err) + color.reset);
-});
-
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-let waitingForPairingInput = false;
-const question = (text) => new Promise((resolve) => {
-    waitingForPairingInput = true;
-    rl.question(text, (answer) => {
-        waitingForPairingInput = false;
-        resolve(answer);
-    });
-});
-
-const delay = ms => new Promise(res => setTimeout(res, ms));
-const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-function getLoopDelayMs() {
-    const fixed = Number(process.env.LOOP_DELAY || 0);
-    const min = Math.max(1, Number(process.env.LOOP_DELAY_MIN || fixed || 60));
-    const max = Math.max(min, Number(process.env.LOOP_DELAY_MAX || min));
-    return randomDelay(min, max) * 1000;
-}
-
-function humanTypingDelay(text) {
-    const base = 300;
-    const variance = Math.random() * 2000;
-    return Math.min(20000, text.length * base + variance);
-}
-
-async function randomHumanPause() {
-    if (Math.random() < Number(CONFIG.presenceOnlyChance ?? 0)) {
-        const delayTime = Math.floor(Math.random() * 600000) + 60000;
-        await delay(delayTime);
-    }
-}
-
-function shouldReply() {
-    const chance = Number(CONFIG.sendChance ?? 1);
-    return Math.random() < Math.max(0, Math.min(1, chance));
-}
-
-const lastChat = {};
-const lastIncomingMessages = {};
-
-function canSend(jid) {
-    const now = Date.now();
-
-    if (!lastChat[jid]) {
-        lastChat[jid] = now;
-        return true;
-    }
-
-    const diff = now - lastChat[jid];
-    if (diff < 3600000) return false;
-
-    lastChat[jid] = now;
-    return true;
-}
-
-const SESSION_NAME = process.env.SESSION || 'default';
-const MULTI_RUN = process.env.MULTI_RUN === '1';
-const LIST_GROUPS = process.env.LIST_GROUPS === '1';
-const SESSION_PATH = `./sessions/${SESSION_NAME}`;
-const HISTORY_FILE = './nomor_wa.txt';
-const LOG_DIR = './logs';
-const LOG_FILE = `${LOG_DIR}/${SESSION_NAME}.log`;
-
-function nowStamp() {
-    const wib = new Date(Date.now() + 7 * 60 * 60 * 1000);
-    return wib.toISOString().replace('T', ' ').slice(0, 19) + ' WIB';
-}
-
-function maskJid(jid) {
-    const raw = String(jid || '');
-    const id = raw.replace(/@.*/, '');
-    const suffix = raw.endsWith('@g.us') ? '@g' : '';
-    if (id.length <= 6) return (id || '-') + suffix;
-    return `${id.slice(0, 4)}***${id.slice(-3)}${suffix}`;
-}
-
-function compactActivity(message) {
-    return String(message)
-        .replace(/^Using saved session$/, 'session saved')
-        .replace(/^Connected and ready$/, 'ready')
-        .replace(/^Starting send round$/, 'round start')
-        .replace(/^Loaded (\d+) target\(s\)$/, 'targets=$1')
-        .replace(/^Processing target (\d+)\/(\d+): (.+)$/, 'target $1/$2 $3')
-        .replace(/^Message sent: (.+)$/, 'sent $1')
-        .replace(/^Round done\. OK (\d+), FAIL (\d+)$/, 'done ok=$1 fail=$2')
-        .replace(/^Auto loop next round in (\d+) seconds$/, 'next loop $1s')
-        .replace(/^Waiting next message base delay (\d+)s$/, 'wait next $1s')
-        .replace(/^Disconnect (.+)$/, 'disconnect $1')
-        .replace(/^Reconnect in (\d+) seconds \((.+)\)$/, 'reconnect $1s $2')
-        .replace(/^Connecting\.\.\.$/, 'connecting');
-}
-
-function safeFileName(value) {
-    return String(value || 'default').replace(/[^a-z0-9_-]/gi, '_');
-}
-
-function runDetached(command, args) {
-    const result = spawnSync(command, args, {
-        stdio: 'ignore',
-        timeout: 2000
-    });
-
-    return !result.error && result.status === 0;
-}
-
-function openFileFlexible(filePath) {
-    const openers = [
-        ['termux-open', [filePath]],
-        ['xdg-open', [filePath]],
-        ['wslview', [filePath]]
-    ];
-
-    for (const [command, args] of openers) {
-        if (runDetached(command, args)) return true;
-    }
-
-    return false;
-}
-
-function shouldShowTerminalQr() {
-    const mode = String(CONFIG.qrDisplay || 'auto').toLowerCase();
-    if (mode === 'terminal') return true;
-    if (mode === 'file') return false;
-
-    const cols = process.stdout.columns || 80;
-    const rows = process.stdout.rows || 40;
-    return cols >= Number(CONFIG.qrMinColumns || 90) && rows >= Number(CONFIG.qrMinRows || 42);
-}
-
-async function renderFlexibleQr(qr) {
-    const baseName = `qr-login-${safeFileName(SESSION_NAME)}`;
-    const txtFile = `${baseName}.txt`;
-    const htmlFile = `${baseName}.html`;
-    const pngFile = `${baseName}.png`;
-
-    fs.writeFileSync(txtFile, qr + '\n');
-
-    if (qrcodeImage) {
-        const dataUrl = await qrcodeImage.toDataURL(qr, {
-            errorCorrectionLevel: 'M',
-            margin: 2,
-            width: Number(CONFIG.qrImageSize || 640)
-        });
-        const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>WA QR ${SESSION_NAME}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font-family:sans-serif}main{text-align:center;padding:16px}img{width:min(92vw,720px);height:auto;background:white;padding:12px;border-radius:8px}p{font-size:14px}</style></head><body><main><img src="${dataUrl}" alt="WA QR"><p>Scan dari WhatsApp &gt; Perangkat Tertaut &gt; Scan QR Code</p></main></body></html>`;
-        fs.writeFileSync(htmlFile, html);
-        const pngData = dataUrl.replace(/^data:image\/png;base64,/, '');
-        fs.writeFileSync(pngFile, Buffer.from(pngData, 'base64'));
-
-        if (openFileFlexible(pngFile) || openFileFlexible(htmlFile)) {
-            console.log(`QR dibuka fleksibel: ${pngFile}`);
-        } else {
-            console.log(`QR tersimpan: ${pngFile}`);
-            console.log(`Jika tidak terbuka otomatis, buka file: ${htmlFile}`);
-        }
-    } else {
-        console.log('Module qrcode belum terinstall untuk membuat gambar QR fleksibel.');
-        console.log('Jalankan AUTO INSTALLER atau: npm install qrcode');
-    }
-
-    if (shouldShowTerminalQr() && qrcodeTerminal) {
-        console.log('');
-        qrcodeTerminal.generate(qr, { small: true });
-    } else {
-        console.log('Terminal sempit, QR terminal disembunyikan agar tidak kepotong.');
-        console.log(`Raw QR tersimpan: ${txtFile}`);
-    }
-}
-function logActivity(message, level = 'INFO') {
-    const stamp = nowStamp();
-    const fileLine = `[${stamp}] [${SESSION_NAME}] [${level}] ${message}`;
-    const terminalLine = `[${stamp.slice(11)}] ${SESSION_NAME.padEnd(8).slice(0, 8)} ${level.padEnd(5).slice(0, 5)} ${compactActivity(message)}`;
-    const terminalColor = level === 'ERROR' ? color.red : level === 'WARN' ? color.yellow : color.cyan;
-
-    process.stdout.write('\x1b[2K');
-    process.stdout.write('\r');
-    console.log(terminalColor + terminalLine + color.reset);
-
-    try {
-        fs.mkdirSync(LOG_DIR, { recursive: true });
-        fs.appendFileSync(LOG_FILE, fileLine + '\n');
-    } catch {}
-}
-
-function hasSavedSession() {
-    try {
-        const credsPath = `${SESSION_PATH}/creds.json`;
-        if (!fs.existsSync(credsPath)) return false;
-
-        const raw = fs.readFileSync(credsPath, 'utf-8');
-        const creds = JSON.parse(raw);
-
-        return Boolean(
-            creds?.me ||
-            creds?.account ||
-            creds?.noiseKey ||
-            creds?.signedIdentityKey ||
-            creds?.signedPreKey
-        );
-    } catch {
-        return false;
-    }
-}
-
-function parseTarget(line) {
-    const raw = String(line || '').trim();
-    if (!raw || raw.startsWith('#')) return null;
-
-    const lower = raw.toLowerCase();
-    if (lower.endsWith('@g.us')) {
-        const groupId = raw.replace(/\s+/g, '');
-        const groupNumber = groupId.replace(/@g\.us$/i, '').replace(/[^0-9-]/g, '');
-        if (groupNumber.length < 8) return null;
-        return groupNumber + '@g.us';
-    }
-
-    let nomor = raw.replace(/[^0-9]/g, '');
-    if (nomor.startsWith('0')) nomor = '62' + nomor.slice(1);
-    if (nomor.length < 9) return null;
-    return nomor + '@s.whatsapp.net';
-}
-
-function loadTargets() {
-    if (!fs.existsSync(HISTORY_FILE)) return [];
-
-    return fs.readFileSync(HISTORY_FILE, 'utf-8')
-        .split('\n')
-        .map(parseTarget)
-        .filter(Boolean);
-}
-
-let success = 0;
-let failed = 0;
-let total = 0;
-let startTime = 0;
-
-function renderUI(current) {
-    const percent = total > 0 ? Math.floor((current / total) * 100) : 0;
-    const barLength = 20;
-    const filled = Math.floor((percent / 100) * barLength);
-
-    let colorBar = color.green;
-    if (percent > 50) colorBar = color.yellow;
-    if (percent > 80) colorBar = color.red;
-
-    const bar = colorBar + '#'.repeat(filled) + color.reset + '-'.repeat(barLength - filled);
-    const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const eta = current > 0 ? Math.floor((elapsed / current) * (total - current)) : 0;
-    const prefix = `[${SESSION_NAME}] `;
-    const line = `[${nowStamp().slice(11)}] ${prefix}SEND ${percent}% | ${bar} | OK ${success} FAIL ${failed} | ETA ${eta}s`;
-
-    process.stdout.write('\x1b[2K');
-    process.stdout.write('\r' + line);
-}
-
-async function waitWithLoading(ms, label = 'Next message', keepRunning = () => true) {
-    if (!ms || ms <= 0) return true;
-
-    const started = Date.now();
-    const barLength = 24;
-
-    while (true) {
-        if (!keepRunning()) {
-            process.stdout.write('\x1b[2K');
-            process.stdout.write('\r');
-            return false;
-        }
-
-        const elapsed = Date.now() - started;
-        const remaining = Math.max(0, ms - elapsed);
-        const percent = Math.min(100, Math.floor((elapsed / ms) * 100));
-        const filled = Math.floor((percent / 100) * barLength);
-        const bar = '#'.repeat(filled) + '-'.repeat(barLength - filled);
-        const seconds = Math.ceil(remaining / 1000);
-
-        process.stdout.write('\x1b[2K');
-        const prefix = `[${SESSION_NAME}] `;
-        process.stdout.write(`\r[${nowStamp().slice(11)}] ${prefix}${label} [${bar}] ${percent}% | wait ${seconds}s`);
-
-        if (remaining <= 0) break;
-        await delay(Math.min(1000, remaining));
-    }
-
-    process.stdout.write('\x1b[2K');
-    process.stdout.write('\r');
-    return true;
-}
-async function printGroupList(sock) {
-    logActivity('Loading group list');
-
-    const groups = await sock.groupFetchAllParticipating();
-    const list = Object.values(groups || {})
-        .sort((a, b) => String(a.subject || '').localeCompare(String(b.subject || '')));
-
-    console.log('');
-    console.log('GROUP LIST');
-    console.log('----------------------------------------');
-
-    if (!list.length) {
-        console.log('No joined group found for this account.');
-        return;
-    }
-
-    list.forEach((group, index) => {
-        const name = group.subject || '-';
-        console.log(`${index + 1}. ${name}`);
-        console.log(`   ${group.id}`);
-    });
-
-    console.log('');
-    console.log('Tambahkan JID group ke menu TAMBAH TARGET atau nomor_wa.txt.');
-}
-function rememberIncomingMessage(message) {
-    const jid = message?.key?.remoteJid;
-    if (!jid || message?.key?.fromMe) return;
-    lastIncomingMessages[jid] = message.key;
-}
-
-async function markChatReadBeforeTyping(sock, jid) {
-    const key = lastIncomingMessages[jid];
-    if (!key || typeof sock.readMessages !== 'function') return false;
-
-    await sock.readMessages([key]);
-    logActivity(`Marked read before typing: ${maskJid(jid)}`);
-    await delay(randomDelay(800, 2500));
-    return true;
-}
-function isGroupJid(jid) {
-    return String(jid || '').endsWith('@g.us');
-}
-
-async function ensureGroupReady(sock, jid) {
-    if (!isGroupJid(jid)) return;
-
-    try {
-        await sock.groupMetadata(jid);
-    } catch (err) {
-        throw new Error(`Group not found or this account is not a member: ${err?.message || err}`);
-    }
-}
-
-async function sendHuman(sock, jid) {
-    if (!shouldReply()) return false;
-
-    for (let i = 0; i < CONFIG.retry; i++) {
-        try {
-            const text = randomMessage();
-            const groupTarget = isGroupJid(jid);
-
-            await ensureGroupReady(sock, jid);
-            await randomHumanPause();
-            await markChatReadBeforeTyping(sock, jid);
-
-            if (!groupTarget) await sock.sendPresenceUpdate('composing', jid);
-            await delay(humanTypingDelay(text));
-            await sock.sendMessage(jid, { text });
-            if (!groupTarget) await sock.sendPresenceUpdate('paused', jid);
-
-            return true;
-        } catch (err) {
-            logActivity(`Retry ${i + 1}/${CONFIG.retry} failed ${maskJid(jid)}: ${err?.message || err}`, 'WARN');
-            await delay(3000 + Math.random() * 5000);
-        }
-    }
-
-    return false;
-}
-
-let isRunning = false;
-let reconnectTimer = null;
-let reconnectCount = 0;
-let forbiddenCount = 0;
-let selectedLoginMethod = null;
-let activeRunId = 0;
-let connectionAlive = false;
-
-function getForbiddenCooldownMs() {
-    const shortMin = Number(CONFIG.forbiddenCooldownMin || 600000);
-    const shortMax = Number(CONFIG.forbiddenCooldownMax || 1200000);
-    const longMin = Number(CONFIG.forbiddenLongCooldownMin || 1800000);
-    const longMax = Number(CONFIG.forbiddenLongCooldownMax || 3600000);
-
-    if (forbiddenCount >= 3) return randomDelay(longMin, longMax);
-    return randomDelay(shortMin, shortMax);
-}
-
-function scheduleReconnect(reason, customDelayMs) {
-    if (reconnectTimer) return;
-
-    isRunning = false;
-    const delayMs = customDelayMs ?? Math.min(300000, 5000 + reconnectCount * 15000);
-    reconnectCount++;
-
-    logActivity(`Reconnect in ${Math.floor(delayMs / 1000)} seconds (${reason || 'unknown'})`, 'WARN');
-
-    reconnectTimer = setTimeout(() => {
-        reconnectTimer = null;
-        startBot();
-    }, delayMs);
-}
-
-async function startBot() {
-    if (isRunning) return;
-    isRunning = true;
-    const runId = ++activeRunId;
-    connectionAlive = false;
-
-    try {
-        const { state, saveCreds } = await useMultiFileAuthState(SESSION_PATH);
-        const sessionAvailable = state.creds.registered || hasSavedSession();
-        const loginMethod = sessionAvailable
-            ? 'session'
-            : (selectedLoginMethod || await chooseLoginMethod(question, color));
-        selectedLoginMethod = loginMethod === 'session' ? null : loginMethod;
-        if (loginMethod === 'session') {
-            logActivity('Using saved session');
-        }
-        process.env.BAILEYS_NO_QR = loginMethod === 'qr' ? 'false' : 'true';
-
-        const { version } = await fetchLatestBaileysVersion();
-
-        const sock = makeWASocket({
-            version,
-            logger: pino({ level: 'silent' }),
-            browser: Browsers.windows('Chrome'),
-            auth: state,
-            keepAliveIntervalMs: 10000,
-            connectTimeoutMs: 60000,
-            defaultQueryTimeoutMs: 0,
-            retryRequestDelayMs: 250,
-            markOnlineOnConnect: true,
-            syncFullHistory: false,
-            printQRInTerminal: false
-        });
-
-        sock.ev.on('creds.update', saveCreds);
-        sock.ev.on('messages.upsert', ({ messages }) => {
-            for (const message of messages || []) rememberIncomingMessage(message);
-        });
-        let warmingStarted = false;
-        let authReady = sock.authState.creds.registered;
-        let lastQr = '';
-
-        sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-            const reason = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.statusCode;
-
-            if (qr && loginMethod === 'qr' && qr !== lastQr) {
-                lastQr = qr;
-                if (!MULTI_RUN) console.clear();
-                console.log(color.yellow + 'LOGIN QR CODE' + color.reset);
-                logActivity('QR code generated, waiting for scan');
-                console.log('Scan QR ini dari WhatsApp:');
-                console.log('Perangkat Tertaut > Tautkan Perangkat > Scan QR Code\n');
-
-                renderFlexibleQr(qr).catch((err) => {
-                    console.log(color.red + 'QR ERROR: ' + (err?.message || err) + color.reset);
-                    if (qrcodeTerminal) qrcodeTerminal.generate(qr, { small: true });
-                    else console.log(qr);
-                });
-            }
-
-            if (connection === 'connecting' && authReady && !waitingForPairingInput) {
-                logActivity('Connecting...', 'WARN');
-            }
-
-            if (connection === 'open') {
-                authReady = true;
-                selectedLoginMethod = null;
-                connectionAlive = true;
-                isRunning = true;
-                reconnectCount = 0;
-                forbiddenCount = 0;
-
-                if (warmingStarted) return;
-                warmingStarted = true;
-
-                if (!MULTI_RUN) console.clear();
-                console.log(color.green + `[${nowStamp().slice(11)}] BOT CONNECTED [${SESSION_NAME}]\n` + color.reset);
-                logActivity('Connected and ready');
-
-                if (LIST_GROUPS) {
-                    printGroupList(sock)
-                        .catch((err) => console.log(color.red + 'LIST GROUP ERROR: ' + (err?.message || err) + color.reset))
-                        .finally(() => setTimeout(() => process.exit(0), 500));
-                    return;
-                }
-
-                startWarming(sock, runId).catch((err) => {
-                    console.log(color.red + 'BOT ERROR: ' + (err?.message || err) + color.reset);
-                    scheduleReconnect('warming error');
-                });
-            }
-
-            if (connection === 'close') {
-                isRunning = false;
-                connectionAlive = false;
-                activeRunId++;
-                warmingStarted = false;
-
-                logActivity(`Disconnect ${reason || 'unknown'}`, 'ERROR');
-
-                if (reason === DisconnectReason.loggedOut || reason === 401) {
-                    selectedLoginMethod = null;
-                    logActivity('Session logout. Delete this session and pair again.', 'ERROR');
-                    return;
-                }
-
-                if (reason === DisconnectReason.restartRequired || reason === 515) {
-                    logActivity('Restarting connection, keep scanning/waiting...', 'WARN');
-                    scheduleReconnect('restart required', 1000);
-                    return;
-                }
-
-                if (reason === 403) {
-                    forbiddenCount++;
-                    const cooldown = getForbiddenCooldownMs();
-                    logActivity(`403 cooldown ${Math.floor(cooldown / 1000)}s. Account may need rest or session check.`, 'WARN');
-                    scheduleReconnect('403 cooldown', cooldown);
-                    return;
-                }
-
-                scheduleReconnect(reason);
-            }
-        });
-
-        await handleAuth(sock, question, color, loginMethod);
-        authReady = sock.authState.creds.registered;
-    } catch (err) {
-        isRunning = false;
-        logActivity('ERROR START BOT: ' + (err?.message || err), 'ERROR');
-        scheduleReconnect('start error');
-    }
-}
-
-function resetLastChat() {
-    for (const jid of Object.keys(lastChat)) delete lastChat[jid];
-}
-
-function isCurrentConnection(runId) {
-    return connectionAlive && runId === activeRunId;
-}
-
-async function startWarming(sock, runId = activeRunId) {
-    if (!isCurrentConnection(runId)) return;
-
-    if (process.env.LOOP_MODE === '1') resetLastChat();
-
-    logActivity('Starting send round');
-
-    try {
-        await sock.sendPresenceUpdate('available');
-    } catch {}
-
-    const targets = loadTargets();
-
-    if (!targets.length) {
-        logActivity('nomor_wa.txt is empty', 'WARN');
-        if (process.env.LOOP_MODE === '1') {
-            const loopDelay = getLoopDelayMs();
-            const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
-            if (!ok) return;
-            return startWarming(sock, runId);
-        }
-        return;
-    }
-
-    total = targets.length;
-    logActivity(`Loaded ${total} target(s)`);
-    success = 0;
-    failed = 0;
-    startTime = Date.now();
-
-    for (let i = 0; i < targets.length; i++) {
-        if (!isCurrentConnection(runId)) return;
-
-        const jid = targets[i];
-        logActivity(`Processing target ${i + 1}/${targets.length}: ${maskJid(jid)}`);
-
-        if (!canSend(jid)) {
-            logActivity(`Skipped cooldown: ${maskJid(jid)}`, 'WARN');
-            renderUI(i + 1);
-            continue;
-        }
-
-        try {
-            if (Math.random() < Number(CONFIG.presenceOnlyChance ?? 0)) {
-                await sock.sendPresenceUpdate('available', jid);
-                logActivity(`Presence only: ${maskJid(jid)}`);
-                renderUI(i + 1);
-                {
-                    const ok = await waitWithLoading(5000 + Math.random() * 10000, 'Next target', () => isCurrentConnection(runId));
-                    if (!ok) return;
-                }
-                continue;
-            }
-
-            const result = await sendHuman(sock, jid);
-            if (result) {
-                success++;
-                logActivity(`Message sent: ${maskJid(jid)}`);
-            } else {
-                failed++;
-                logActivity(`Message skipped by sendChance: ${maskJid(jid)}`, 'WARN');
-            }
-        } catch (err) {
-            failed++;
-            logActivity(`Failed target ${maskJid(jid)}: ${err?.message || err}`, 'ERROR');
-        }
-
-        renderUI(i + 1);
-
-        const isLastTarget = i === targets.length - 1;
-
-        if (!isLastTarget) {
-            const baseDelay = randomDelay(CONFIG.minDelay, CONFIG.maxDelay);
-            logActivity(`Waiting next message base delay ${Math.floor(baseDelay / 1000)}s`);
-            const chaos = Math.random() < 0.4 ? randomDelay(10000, 60000) : 0;
-            {
-                const ok = await waitWithLoading(baseDelay + chaos, 'Next message', () => isCurrentConnection(runId));
-                if (!ok) return;
-            }
-        }
-
-        if (!isLastTarget && (i + 1) % 5 === 0) {
-            process.stdout.write('\n');
-            logActivity('Resting after 5 targets');
-            {
-                const ok = await waitWithLoading(30000 + Math.random() * 60000, 'Resting', () => isCurrentConnection(runId));
-                if (!ok) return;
-            }
-            process.stdout.write('\n');
-        }
-    }
-
-    process.stdout.write('\n');
-    if (!MULTI_RUN) {
-        console.log('------------------------------');
-        console.log(color.green + '\nDONE ALL TARGETS' + color.reset);
-    }
-    logActivity(`Round done. OK ${success}, FAIL ${failed}`);
-
-    if (process.env.LOOP_MODE === '1') {
-        const loopDelay = getLoopDelayMs();
-        logActivity(`Auto loop next round in ${Math.floor(loopDelay / 1000)} seconds`, 'WARN');
-        const ok = await waitWithLoading(loopDelay, 'Loop wait', () => isCurrentConnection(runId));
-        if (!ok) return;
-        return startWarming(sock, runId);
-    }
-
-    setTimeout(() => process.exit(0), 1500);
-}
-
-startBot();
+// Protected build - source is packed with gzip+base64.
+// Original backup: index.source.js
+const zlib = require('zlib');
+const payload = 'H4sIAAAAAAAEAL08a3fbOK7fe879D2wmu5IbW7H72o7z6KZp2mYmr7HT27snySayRduayJIryXms' +
+'1//9AnxIJEUl6ezc657T2CIIgiAAAiCocETcWZoMaZZ5NL7xel+PLj/1jg8v+1/I860tstJZaZDF' +
+'MwKfYRJnSUS9KBm7K+fx2fML8nke+9d+TAZJ7mWT83ilscFAC4x3Ye524OHy2TN1lA87+wd7/+hf' +
+'Hh1f/tYjMEqezunKxrNnoUHO4deD0/1LIIoR43ScRkHGMKJ+6gJula6rfu6neRiPkSRytrpQkfX3' +
+'+v394yPy738TJ6Ajfx7lzvLC87zz+ArwMEQ54I+SFGjik05pRvMuWTm/6wzO2tOVJns6TimN5dNX' +
+'L+XjlAbFw458eE+jKLktnr+Sz4f3foni7XTl2bIgYRIGAY0PkvGJn+c0jTMg54x1cj7MRyOaOhyF' +
+'04ephUm8F+fpvXy2GyUZMiCZ0ZhkHEC2qc9IGJORfwNzTUbwfZhMsdcspdf0ngzmcRBR2e0jHab3' +
+'s5wG8sHlcOKHcSZ/QqdfaUHAbD5Qf6XhDf58dgHTG83jYY5jZ5NkHgVfwoDCLN3hZB5fq2KWkyzH' +
+'NWANXp708xSIc4V0pTSfp3GVS16WTKk747/I1jYi8WBm0TygmXze4NLIR0nScBzGftTPg2Sef0vD' +
+'nMKoUmYy9tS7xcfeIIwDV28RsqehoWlqQQNPa9BAC4qebUhAwTnTJBSWJwAONMnQj6KBPwRuwfw4' +
+'w1BnbPxsSEahcmmcs0z7gZE2mGTaZvP/QqHk6KMU8rXgIwr17pKpf02/7fST4TXNuUTOM3oITeGn' +
+'MKI783wCFiOnvGlE8+HkAH5m+Qcfmu+z/6Yp6gpv/pAmtxk84L8+hhmMGNNh3qN+lsTPlsCOlH6f' +
+'hyl1nb/fTsIMNCljI2frA47PKe3MLIwTtQf+dgqRGmVq2ygrW1LqB1EYU7VdPiuhFiSb+bdx/z4e' +
+'Eo2w4SSMgkuxmggf0Zx8T4Gn9JSmU2Q6gMfzKNp4BlZF8LMCUODjLa1cNCHGJawMMLKuK8cNOliO' +
+'vD/1x7R2WNlqjFk3lI6s0PXd46NP+59VNN46tIzCscq11I+DZHoIvEEkSx18yh9naofhJEkylOkw' +
+'PqT5JAmaZOKj8UTZMhH48MxR9T2JXQdsoj8fT/K9uyGd5cxaExftQqlA6hbH9icPthqyRpy9Xu+4' +
+'1yUOfMcu7z1BIu5xDMUakfCwjyHDqqNzcoMe/Z0Of3D4E/AU9vt75I+RIeSZixMXYG8I33K6H4M8' +
+'jfwhdYUBiWdzUGbFBoVCJ8F+mU3wiONH+br1Q3QHPiXpiR/iJrKPqGDEkR9lVC7j9zmoPO5LYNBy' +
+'epezucf0lpyksC1m1HWB8CS6oQpTajErxizyJGaGFhjrx9ktVXn7ICpBpIQTREgkvGGpszOgkX8P' +
+'XaeZOQfozTZFmp+GUwpcwidNAGyUtoVJ/0eBwgWNhXb/jpF76OcTbxQlSeqyrxzWbZAXAOjfkRYB' +
+'cFjoTgOXG75vlNv9mOYHSTJjiA8zV9/qR+EdSNMWOZpPBzTV3L+D4+OTy497Bzv/QElqixnzbjja' +
+'FqcKhnc7zYcRXB7uM8+PjwZf3rYbOj6Yg4KPzf0RjDv/g4gAsqF7JgobFR6+IJ12u80sUsGYyXzq' +
+'x6f3YPvHHJxLn8qegZ+hNXuFXcunN34a+vGQSpKV1XjZlqCCHD6nMHaxpd0kOIYX0XgMBuoFx79W' +
+'IOTukZ/hxlGQybF/QWJPfNhAixXEnV0ff1Myjdtbb4YqD3iP4+h+d8JIfv8elrKhyL8iuSiack52' +
+'YXuLk2ijjLFvpXb4qEYci1vgkkqicZ37Ij06i+4NWRxOBFP1ScAMgpL4TqPKXmX+hQgBqwvWg3hy' +
+'3Jr/GflZDnhR1RfLDeXhvvDHxUaUCYByCkM/7gNR7u9hoM8gTm4B+CMYUQ++ostcLNRzOdwZ9LpQ' +
+'F0BrwK0zuVWtjuGjLZ8p4wXhaMR7gAXQ8GwUAzOYTfJKLp3AKKzbswcp0EYvGCdCucujncM9xdWu' +
+'i/Ika8twUu+jPOdhpuxwsN8/vfzcO/560je6aC16J0ncyc7pF+h15a2LkCtbX12olC+vZJcvgO24' +
+'94/LTxAXQxdwFeJkmqSXt76X35X0Hxx/vvy43+MQsBtnWovofLW6EHBLczzcwa9UMQI2g/87nRlq' +
+'cBsOcA1g80BBcktpAq37G9NB+R+aNF0doC9EbPv9Yxm0waY/i3Avd07BtXCI0/CyKITfoB+dnxGl' +
+'Q77tf3B0yzj1s+tfQouApz4KuEAOrWyhHc2Uh7idAFwx8vrfvRfrTRMsg1g6vBOgoEzZtzCfgOs+' +
+'9ubg4pH3BL46BNwapxTlMJCWc3OLvC1E2RV0tBycD0escQUWBboW837dWL548UJ51nrVWK4ueEcU' +
+'C5UVYApm/jDfgV83YQ5bCjcKjSJFwUYQHJGNhfqWTPjnV5YYyPwb2AGFSK4iW2RGgLU41q67PNSB' +
+'jmDomLt2z7qyb/YuRSoGrSdJk3kc8C74DWJzaLV3PEj8AAZyz4O1BgEw8B7O3ey8wXrz39nWasfe' +
+'+YTrKI7LQTme83X2p0tcb01FRFY766svyeorOzYZCMAUcqUv/iR1FPTY/IIkpuceOf6Vj98kn3b2' +
+'D/h3hgLbSXIN8wA7GEZbqy/t2CCMSAhshDNQx7ucsxFTN5w7GQVRDjKGkbUzyNVOZkf2jTuaHJX0' +
+'0ZkDwN1GhpRjY5spg6vFVkbAJWeC8lktf6iEMKdBzl1EJFY6pSWmjNTxRwgmzOrcw3+s67B46DR0' +
+'Xcr8EcXI/8ifUvfGj+Y1asSatD2ktGPrZ//0W/9qt36+bF2sj0MY79IcJp3HH2nuDyc0gIhpCn4T' +
+'xIUgcJlhy2gGqMECFcG6Dt1U9mgMehIwRuE4TlKZmsNPzr35LnP8ipBAndNzPo4HoViSkr/+VYwL' +
+'wZKfzzO2fRl+KSYKkU2fInoXDiLqjuDHCTgzOv0IRtMyPYmfMwdzAfO7FjaCwT+TXS8umgrQXTB+' +
+'BOI2i25CeqsDsPYLMb0RzMbllJxpfLvAnKYgTvVz0ILXL40lHbXU+Cgclqor2Z8ktzLD8VtqbKbT' +
+'JKDljiU8yu8paM8MdQ5lzAclBwHLk4MEArtdHz3scs/hCNDHKLMsVVJ1SOSYY/W0iix3Vk11wtP5' +
+'NM6QpndauIGZryo4ewqwr/V4g+HeNn3o7+lhGO+WA/wMjiCKIuKwA/ck+pf2oAS2FZpKCQW2f0+r' +
+'kRPqOfpE39NWhDmaFmyyqglQ3aMGbrxld3C8EIx7VBLXEv0xDWySTyMbHD7XAGcQ4Vvg4PGVlOeM' +
+'51URjBkDQUKTfE/RTTqPHdWfV9JdlmjKz/2vLLfC4yIFGOTsI7b2DgCFamLww2zEbpKmPBl0QG9o' +
+'BFbnUDE4+JmCxoQx2Bz98W0Y5JNuZTHZsP3wX8yivn3dLi35srFhEI58Qx5tPg+SYX4/o+zJ9qb4' +
+'H/yN7c0pKDCJgX1bK2giZkmar2D3HPblrRVGxFZAb8CxarEfzTCGjc+PWtnQj+hWZ2V7Mw/ziG5/' +
+'2yG/9YjhJW+u88bNLL+HP4MkuF+I+bY3QP9aExqOJ3kXfN+byUbA9bg7TsNgg20QLVjCadYdUsxi' +
+'bWCGesy27e5PnU5ngyXCuj9RSjdGQHFr5E/D6L6b+XHWymgajpZTP4wXGKS3/AisvUQ08wPMe3c7' +
+'b2d3y3A6XnBmY3T588ub2+bfXrZnd40NQRyaFHXs2wlQVeJ4ObvbGCQpKFAr9YNwnnXfAdbZgpGU' +
+'wUp1O6/hweY658HmOmc88gLYDwRubwIJJEuHWyurCyFsyxXiR7AAjKvA49l2H+JUEMU0JN8guMt2' +
+'ZjPy13G+QU4oBMzja4h8wWzmQCt/zMBhQXZBVDfXZzAsH2qdj7vOZOCqlJiKwkhlbDKhqcgW6BpK' +
+'PoiXoFhxJPBJN0RBPV8HuA3U0Levm2rYYB1SqHWT8KM5b5QmU1cMBH05GqchFVcqb2WHFXgaqCKV' +
+'RjkvLW0i51UcfgLngnAwv/bJKKLXWThA1V1dCMzLK2UaS0JhS3gEWY6nHxB7xHVYKp1+CWHwPAz8' +
+'a+zMSEnyZOrnIfgynDLAgejkjHSqnllpU4dwDpNgDlaU2zMCU5xPcawQ1tePIjKP8/k1+LbTwRyk' +
+'a+xPB36KIlVwxHMMsSgw/+JHfozH2TtfT4/J/lH/dOfgYK9HYCHnXRLPpkQOUh5AcKqNU66KOwD7' +
+'nH4MYtrrggaVOL2LN0Z3BsNxZrRJNgVKuswBKKzow5wrzmAyOp2FeZPwJebPwIwhz+L7EDngj4Fr' +
+'fB2v6QyWMB7X8u2qBxG5KS1i5ypWFxNwxc4Nvcxgtkki3Gkws7F/9OnYMU+D/emMZ4VEukLdWFGk' +
+'DviJ2NUZ7O8IsbzA03/NrLMnbBT4uroQAxt7vmCHiU5E6Z1Og/VV8XpgU/fiwH2npDXeNZZEjCWb' +
+'3yjNb1hzXVhvp2hXlCUINqGPx05dHPKelGcyXbX9207vqGzmdQgAwX9i+YEwSbbDZ9dhhQkvf5Wr' +
+'XgOUqikVKRE6zWs6V82jINa7PPITNnZ6HYQps68il4UiDz7JHGTshhpiL/r4MzCbQWGYZUqsWQpI' +
+'4UNxZRFnh3pyeOJnfcyDiNqKwpnXSRReNPA8w8CEO3Vq4m+5zhq937MkVnYslocdscqYLM94xCeR' +
+'NKz+ejkaz3xBZ0y6FNMsusNmM89HrXemngoyoesv/eMjkMcUD4P8W3VHEuN+SGAJ/djVDTz2xiM9' +
+'2JlsDf5wCB5GXtMaJ2BYfqX3Nc0ZODg02A/AxQEdeAzuhBWaFO3mQprTUY7P9DVmPDhlCSAXjx0f' +
+'yDCyo3aeYvTgyVQNzJ4jJLRh/pDls0QG8SenXEp+Cq1gjzDEE0nHmoCPgVQzklUnH3272X4l23me' +
+'ra2PDb9F6cC9c+gkuitp0vE5jLS6HrLOasKj3foZkx0GUiRWQVmkRsEA6vM3FkYlY42I+WmbKZ7d' +
+'shS4OTdGik4JUsFgtUVoI8MkCuftSzycFlDclld6F9T/bKFePmAIkWbwA9GlBaPjxTQ3stdR4gdc' +
+'vjLtrMxQfTXtX4rM2YWevjE1Xu1VKn2ZHIN4JMxdZunKh1N/5ipir7SAdQQD7QrdbxSlGdl8iBaf' +
+'sOQQPsA8JTupFb/zJGcFHeInY744v2urhww8UP+674L1hu/G+eaMphjg4ME5w7dN2rBnKQeAshtZ' +
+'5xDiJLUBW5mWowBH74Cv4BZ52TYcBE64ilWOu86RvSj7S8OIk2J71QefFaOxbYuV/pWSI7Fskzft' +
+'RhWab7o28Hc2cLB1mq0YlG0IBmL3k4OqQP3c5ZMySisQpFWAlBxpCR5ofhON/FlW4Yty2NMq17TB' +
+'+aQfwVMWSsnlqS6cHGCdFCv/grh8mVvFs8pCzlLKz2Wuqi7c1cZ/qba0dNNK19Dw1Ti2ZX/v6CP+' +
+'4guw/Av5N8EsTLqEL8e/Ejx7YeK+5In61QWXdmzeO92B3zDZZXb1p7hMsEps17FltTBZgwYMD0HY' +
+'eQ4ETpE/4K7xkZK3d5rgmtNZbx7HmNLfIi4r00DHSLM4U5ZDg/83QS2NvKHuYqc5Ewb17LhGu16L' +
+'rrcTTGi56pjFuApxbiVsfRL/HgFOTbjqrq9sKDaxr4o66p8OnVJMQXAOqyf7wNCWRFXNMxQ2rSwA' +
+'aMtygIpyTDNp0iqIftxy6f25AbFajafYCUU8xAmNoGRIw8gtWVPYhqLXkxf46Spfi/bqPH2CAYB4' +
+'DNVoiVEg6v2FYQ1YlhTMAJ8oqLqZsSmnyzVpAJvytb38RF11WPaiZ6OhOTl/SuBlFEgY5mQGTmz+' +
+'Gd2tA/A6XCxHlbqoRuGOMDfcMwPrlOVFqlnxHLMinYyIPPbsExbN7kTRCZ72DsOZnyul2tJMZ6gL' +
+'xwOsMPTY0VrmCoRgmxZL1XlJ0tx1/SYZMHMmvHDfy+ast3TFowQzubsYQqfUFVADA6qhTqGSYtEe' +
+'skoOVu5hbW498aPl55/jvIVXWZvwOUrI7wlsBoFg/Ygd8OLJVj4JMyKCKy35wldcd5dxJOi05w8n' +
+'Lmdtk4Tgdt0ZpYaiSIifijA4jWctpybHs7pg2LC+b+mBmiAGLXWnQcPv1QXHHgZlDujpy3GKebsJ' +
+'ZqJ+2f8oOHNNYeuL5+R05/DDzhf40/u8d8qSc0QtlvH4WazifWIykKZGSZVZRcEZ8zsrHRFN771r' +
+'ev8ejOQ0yekvYaAEfqLuRAfEzO8hbWjrYyvmkjVOojd2tnkCUz+9xpKoHvj+HygsLuWFgkyJm6RS' +
+'GIP3NrbqB1Sov2ZhNsHDlWTEVRkDjKLYjN21kXTYTxEVK6B2dc8A94VYUdXAXB3CbCivHCEDNhsc' +
+'H88iMBenFPsU4qIaVLWi8h2a1Jdvyu3SsIAFA8OMGT6jikg/5y8LiKrxtm1RaJzNU8rw4rrcVxeD' +
+'cdgYupQJSyrJNKiH4GniYQTrqWc4eF122TWfpMktq9Paw2M794qNCuqQCztimBFgCWv0CdcJ5L2l' +
+'XlvL2pocwGoeVglaM3WtuNIqO+zYHoOrkEWK8GdTVOeDLAFv4MnamjZNjV+lxOMZGcsPKDX7ruEU' +
+'KrsXj3yhg7E6yj5frscDC71hAa9WyNqgnqDSBjGMpQr1DVVccClORH3t11mAZwMOZpXZBTCnnliu' +
+'U/baY2uHYjTJZMCMCVm2AEujyw+TPEOGBY51/pUyh4fUAT+a0emhOIGMh2zfWl9dqGK2lAkNw/7U' +
+'KkVTpNQf4Okr8PdgLLNm+U0ZOTP61a27UlvCNCMr4zrRgo+LkigMydPijovWtMsUvUzaJOmAXZQz' +
+'nmc0YvV8ys0VDZ+PTKRAxb6S8ZF1VUm8E0FrSZxW6v+pHDKJguQ2rpT8g41I80NWwK+XCowqXQGI' +
+'Feu3zeQDx8GK9h/DAUCAo/OyiiRKYJd8iI4DADBo6byrwfMQLRoeTs+rYlKF8TQWa3uLvCosqLoF' +
+'CrKbctz66weS082CX2ZBHBZCzSNaVOVBnIPX2ZpkOM9ygeYwU028LoXG3maR3JJNAUfGkkYKciyq' +
+'L0KmV21+S+ENVyVDriFOfqOWHKuNa2sycafbAKXccHWhBNKSGhG9Losg111dcCYw12AeX0NsGTvL' +
+'hmoB9PGlPiqXa1zD867RXdnM0g8fklxuHMum5JbVDynBlYUpeK/7oOqSlIZUpDeEgq+tKQpfANQo' +
+'O7bajsMWSFZOm6yQeJcdOi2LiNF679JVj8wsSQd2BLdzA3baH7DSKTaAx4/WUjqGsIem/D5P5dzO' +
+'xBZpls7ErZn090VNtKM97xLXZjdhdD7HymVAV97/avIsrbq92i2wRiX64ZIQIAolBo94SxD9KKa2' +
+'70ObpGOpCncqmxV+HrrBXxn6e4oUO0xkWBE9Sp5TOdNckBt+xVaRlNpruG6j0h+dCgyllGu+rj7X' +
+'G/UKr8KAMbq/eOnWXfBDc6Axg9Hi3AGXRgcf8Ju/3eIKsHcL4TB8dZ1dcMGn1DE64EXPrtAGrQGz' +
+'okyd2BXHGz86zLrM/LR1OMVWgDFBoLdVIFGa/NucpvcKpAHFnJ0eZZIoDG4X46dKQd/1cYxp6eNY' +
+'1FTzU3YdDK3QJxDDL6B5SXrf5TZBh2E5p996+7EsOBFQpUip68jcQnrDLqNyvZ4zv9BRzIiqNQq4' +
+'vI8LPWBRcry4upBRNZgewwDjR6kYlt4dRMBFF1Dks4vGoymDDW0m8ju/boozHveLZLqRjGaeFcgG' +
+'CynQCuFsfGkNK3ZN74ih/W8sn+vU8a8w2SUTgSXl4yZDUhbus8pSG6Nk8pvtgltGr/e8kvy9x2/f' +
+'vheF5Fi1hyysAS6BLDHOd1aXbrUirHiK5SQ4A0xjxtgjWfM93ag0soCkuOJleYOI2UFNRWnFM2vE' +
+'OTj+vH/EahSPP+45lWqWCmGqpYVerGhNVnJBDCWu/jLBzIZ+bAYXJjmOLJEM41AvrOw+2rVadLlN' +
+'TuEPptnKtm2tClMpOVY/ttprjwVlrnF3/HHeirvkMOAPXyO3DVBWRpfFdj9eSWd+WF2dSvv31AJp' +
+'9l5WBb3URS7hylUVlPTSOMCP5/aL4VYFUOWsvBPjeZ5TE7Y+gTZ2P8M2mmrC9NBcfh4KL03YqqNp' +
+'x2n3Y9WPLQg2YWwBsdVk6LZcd6nVT8XmK2erJs7/0Ayx4gPQggcOvD8cn2Iy7Whv93TvY7UG8jy+' +
+'+jGbZbn4Z7UIODvlTqxNavBjO4+yAuLHtCi1tgMHJvwI5wdtyAODj9BWRPcikKtEdto7rtoNFrCa' +
+'2TP5qROdZZWPLLD7xkVKpAVZjPafmleUiz/FvlYTBo7QAH53xLYN/RG7GEEkZTU+NRkGgwv20NUE' +
+'VIJezB6YzXXu3IMqc6Xci7QnEjCPwIt36zRJOl7ACfM9Qx6LXYLjOTuxUwBftzt1Wvcj1ticjnzJ' +
+'GD7EA2gCMQTNKT9XkDeH0TbMYIvCwvEwZntOMUHbAD+gEI+xA2QVl6fH37ITGEx503lTxxRtkj2O' +
+'BaVK9ZYxXGN+GcrbutiOH9hUC4ZXlUTQKV8HhPnujp4W/nMY9Lr9qm7G+tZnE3j8yAuCPFmJx8Q1' +
+'Kd3HZecKiCkxacm34qnMvmUe2RGnVFP/nsSUnRayt6sVYgZchWCnLhH/APNVOpxm8fVPMNc16dOK' +
+'wSu+qSrP8x3l+6KEwTeSRk01LlIQ/3AgWXdu8oBF1ZSEqTTpn+70TtHPeGAnsem/ZVm4Rmjbhl6o' +
+'zTaiA/FukCLXqUTxeH4LEbwoLcEXrrnyVSKNBmZQ0VQZryVRBwizXV6GuFtovcv3W/242NxR8OYq' +
+'T52Cymmp05pcrWVLJ1pP4/y4jiwz3W68MJO9nugQQlP5UpKGyUNLjtyxvKqh2JpqD6ttR3m+TKda' +
+'LlkoWWfxEgeWN1QKpdXaGQFiKZ/RKFcrP/B0m05n+b3NOj+BUbYMSCRfW8XtoPYWK9tBc3JdpDHN' +
+'Ss4CFVCHeBgAJmiYO/fAiluOV5NrezwipLXWibSldS3lRLKyW18ES1WHeFXH6oL1WIoObtaQFQRa' +
+'ETnTXaWInAEoVeOVtxbZKgUMmsxagR9Tn3LheOWPQH4WXthN4FX19SLK6bJO2tJa2aITqr7G6cGT' +
+'7P51OJsB3+TOVcVdsykWxfeMyqrMgtrP7dWy1aqLP+dtX/LzZFNiK2SwLAzvThIYuram6MmcwU99' +
+'hPWgnr+x1wDwJL+o4eaS8uPKr65ErRHg62ih21hrDmdN+4rXkoglslT8VG0S72RbaGEDbP6mXiKm' +
+'vWznkRW0XmDGDzcwTx9MKNbgnpRveXuydil+3QM1KXaSNHI+cbNY2JQnV6RU3CxlRSsSbti8MEO3' +
+'oCyLYluhbsRIi3RMo6V2s++aeOld7ppqNYKwErAtiY1QPvDv2IPGAxx67N1FWnRRElCEF7Z76+yF' +
+'f0lR1a6Ytbb3mrzXaBf6+5a/wq5rphargviooSiJXON0NCs3PP6AeXjQNCxtYlJZVPRuhcyQv5A3' +
+'/AVBT7zCUTnBqITZuIj+CMISwCyEzezzB5jJykYsZvetMLti5P9Tnj6VLVr912MdzLSxXnTxxAr1' +
+'urv7eloZRv14fLRHdg4ORHl1337Ctax6guVbzzz9PlXTuFB11Xh66LIwDNbTvHGNrrr3p2nmosRr' +
+'1gLZDP//h6dfK3FP8/CFbD2etMZqKl5gpBYg/S/tB4ttFmIAAA==';
+const source = zlib.gunzipSync(Buffer.from(payload.replace(/\s+/g, ''), 'base64')).toString('utf8');
+eval(source);
