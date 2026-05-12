@@ -554,16 +554,28 @@ open_qris_browser() {
         termux-open-url "$url" >/dev/null 2>&1 && return 0
     fi
 
+    if need_cmd wslview; then
+        wslview "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd powershell.exe; then
+        powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd cmd.exe; then
+        cmd.exe /c start "" "$url" >/dev/null 2>&1 && return 0
+    fi
+
+    if need_cmd explorer.exe; then
+        explorer.exe "$url" >/dev/null 2>&1 && return 0
+    fi
+
     if need_cmd xdg-open; then
         xdg-open "$url" >/dev/null 2>&1 && return 0
     fi
 
     if need_cmd sensible-browser; then
         sensible-browser "$url" >/dev/null 2>&1 && return 0
-    fi
-
-    if need_cmd wslview; then
-        wslview "$url" >/dev/null 2>&1 && return 0
     fi
 
     return 1
