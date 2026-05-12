@@ -132,7 +132,7 @@ auto_install() {
     npm config set audit false >/dev/null 2>&1 || true
 
     echo "[4/5] Installing bot modules..."
-    if npm install @whiskeysockets/baileys pino qrcode-terminal --no-audit --no-fund --silent >/dev/null 2>&1; then
+    if npm install @whiskeysockets/baileys pino qrcode-terminal qrcode --no-audit --no-fund --silent >/dev/null 2>&1; then
         echo "      Modules ready."
     else
         echo "FAILED: Module install failed."
@@ -513,7 +513,7 @@ update_script() {
     fi
 
     echo "[4/5] Updating bot modules..."
-    if npm install @whiskeysockets/baileys@latest pino@latest qrcode-terminal@latest --no-audit --no-fund --silent >/dev/null 2>&1; then
+    if npm install @whiskeysockets/baileys@latest pino@latest qrcode-terminal@latest qrcode@latest --no-audit --no-fund --silent >/dev/null 2>&1; then
         echo "      Modules updated."
     else
         echo "      Module update failed. Keeping current modules."
@@ -571,47 +571,19 @@ open_qris_browser() {
 
 donasi_qris() {
     qris_url="https://raw.githubusercontent.com/bambank1/Qris/refs/heads/main/IMG-20250506-WA0005.jpg"
-    qris_file="qris_donasi.jpg"
-    opened=0
 
     clear
     echo "============================================================"
     echo "                         DONASI QRIS                         "
     echo "============================================================"
+    echo "Membuka QRIS di browser..."
     echo "Link QRIS: $qris_url"
     echo ""
 
-    if need_cmd curl; then
-        echo "Mengunduh gambar QRIS..."
-        if curl -L --fail --silent --show-error "$qris_url" -o "$qris_file"; then
-            echo "QRIS tersimpan: $qris_file"
-            echo ""
-
-            if need_cmd termux-open; then
-                if termux-open "$qris_file" >/dev/null 2>&1; then
-                    echo "Membuka gambar QRIS dengan Termux."
-                    opened=1
-                fi
-            elif need_cmd xdg-open; then
-                if xdg-open "$qris_file" >/dev/null 2>&1; then
-                    echo "Membuka gambar QRIS dengan aplikasi gambar."
-                    opened=1
-                fi
-            fi
-        else
-            echo "Gagal mengunduh QRIS."
-        fi
+    if open_qris_browser "$qris_url"; then
+        echo "Browser dibuka untuk menampilkan QRIS."
     else
-        echo "curl belum tersedia."
-    fi
-
-    if [ "$opened" -ne 1 ]; then
-        echo "Gambar tidak terbuka otomatis. Mengalihkan ke browser..."
-        if open_qris_browser "$qris_url"; then
-            echo "Browser dibuka untuk menampilkan QRIS."
-        else
-            echo "Browser tidak tersedia. Buka link QRIS di atas secara manual."
-        fi
+        echo "Browser tidak tersedia. Buka link QRIS di atas secara manual."
     fi
 
     pause

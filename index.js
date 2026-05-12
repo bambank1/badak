@@ -57,11 +57,19 @@ const {
 const pino = require('pino');
 const fs = require('fs');
 const readline = require('readline');
+const { spawnSync } = require('child_process');
 let qrcodeTerminal = null;
 try {
     qrcodeTerminal = require('qrcode-terminal');
 } catch {
     qrcodeTerminal = null;
+}
+
+let qrcodeImage = null;
+try {
+    qrcodeImage = require('qrcode');
+} catch {
+    qrcodeImage = null;
 }
 
 const CONFIG = require('./config');
@@ -172,6 +180,81 @@ function compactActivity(message) {
         .replace(/^Connecting\.\.\.$/, 'connecting');
 }
 
+function safeFileName(value) {
+    return String(value || 'default').replace(/[^a-z0-9_-]/gi, '_');
+}
+
+function runDetached(command, args) {
+    const result = spawnSync(command, args, {
+        stdio: 'ignore',
+        timeout: 2000
+    });
+
+    return !result.error && result.status === 0;
+}
+
+function openFileFlexible(filePath) {
+    const openers = [
+        ['termux-open', [filePath]],
+        ['xdg-open', [filePath]],
+        ['wslview', [filePath]]
+    ];
+
+    for (const [command, args] of openers) {
+        if (runDetached(command, args)) return true;
+    }
+
+    return false;
+}
+
+function shouldShowTerminalQr() {
+    const mode = String(CONFIG.qrDisplay || 'auto').toLowerCase();
+    if (mode === 'terminal') return true;
+    if (mode === 'file') return false;
+
+    const cols = process.stdout.columns || 80;
+    const rows = process.stdout.rows || 40;
+    return cols >= Number(CONFIG.qrMinColumns || 90) && rows >= Number(CONFIG.qrMinRows || 42);
+}
+
+async function renderFlexibleQr(qr) {
+    const baseName = `qr-login-${safeFileName(SESSION_NAME)}`;
+    const txtFile = `${baseName}.txt`;
+    const htmlFile = `${baseName}.html`;
+    const pngFile = `${baseName}.png`;
+
+    fs.writeFileSync(txtFile, qr + '\n');
+
+    if (qrcodeImage) {
+        const dataUrl = await qrcodeImage.toDataURL(qr, {
+            errorCorrectionLevel: 'M',
+            margin: 2,
+            width: Number(CONFIG.qrImageSize || 640)
+        });
+        const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>WA QR ${SESSION_NAME}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font-family:sans-serif}main{text-align:center;padding:16px}img{width:min(92vw,720px);height:auto;background:white;padding:12px;border-radius:8px}p{font-size:14px}</style></head><body><main><img src="${dataUrl}" alt="WA QR"><p>Scan dari WhatsApp &gt; Perangkat Tertaut &gt; Scan QR Code</p></main></body></html>`;
+        fs.writeFileSync(htmlFile, html);
+        const pngData = dataUrl.replace(/^data:image\/png;base64,/, '');
+        fs.writeFileSync(pngFile, Buffer.from(pngData, 'base64'));
+
+        if (openFileFlexible(pngFile) || openFileFlexible(htmlFile)) {
+            console.log(`QR dibuka fleksibel: ${pngFile}`);
+        } else {
+            console.log(`QR tersimpan: ${pngFile}`);
+            console.log(`Jika tidak terbuka otomatis, buka file: ${htmlFile}`);
+        }
+    } else {
+        console.log('Module qrcode belum terinstall untuk membuat gambar QR fleksibel.');
+        console.log('Jalankan AUTO INSTALLER atau: npm install qrcode');
+    }
+
+    if (shouldShowTerminalQr() && qrcodeTerminal) {
+        console.log('');
+        qrcodeTerminal.generate(qr, { small: true });
+    } else {
+        console.log('Terminal sempit, QR terminal disembunyikan agar tidak kepotong.');
+        console.log(`Raw QR tersimpan: ${txtFile}`);
+    }
+}
 function logActivity(message, level = 'INFO') {
     const stamp = nowStamp();
     const fileLine = `[${stamp}] [${SESSION_NAME}] [${level}] ${message}`;
@@ -458,13 +541,11 @@ async function startBot() {
                 console.log('Scan QR ini dari WhatsApp:');
                 console.log('Perangkat Tertaut > Tautkan Perangkat > Scan QR Code\n');
 
-                if (qrcodeTerminal) {
-                    qrcodeTerminal.generate(qr, { small: true });
-                } else {
-                    console.log(color.red + 'Module qrcode-terminal belum terinstall.' + color.reset);
-                    console.log('Jalankan AUTO INSTALLER atau: npm install qrcode-terminal');
-                    console.log(qr);
-                }
+                renderFlexibleQr(qr).catch((err) => {
+                    console.log(color.red + 'QR ERROR: ' + (err?.message || err) + color.reset);
+                    if (qrcodeTerminal) qrcodeTerminal.generate(qr, { small: true });
+                    else console.log(qr);
+                });
             }
 
             if (connection === 'connecting' && authReady && !waitingForPairingInput) {
